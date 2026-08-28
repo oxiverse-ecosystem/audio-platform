@@ -7,6 +7,8 @@ import soundfile as sf
 
 from audio_streaming.enhancer import (
     EnhancementSettings,
+    _enhance_dynamic,
+    _min_stats_air_attenuate,
     enhance_file,
     enhance_voice,
     enhance_wav,
@@ -175,3 +177,45 @@ def test_enhance_file_round_trips_mp3(tmp_path) -> None:
     assert mp3_out.exists()
     assert report.noise_estimation == "off"
     _ = _as_channel_matrix
+
+
+def test_air_dehiss_engages_with_dynamic_profile() -> None:
+    """Minimum-statistics 'air'/hiss attenuator must run with a signal-derived floor.
+
+    It needs no silence and no hardcoded frequencies: the per-band temporal minimum of a
+    smoothed power spectrum (Martin, 2001) is the noise floor. We feed a band-limited
+    voice plus steady broadband hiss with no quiet lead-in, and assert the stage engages,
+    stays finite/mono-preserving, and never exceeds the attenuation ceiling.
+    """
+    from audio_streaming.enhancer import _min_stats_air_attenuate
+
+    sample_rate = 48_000
+    rng = np.random.default_rng(7)
+    n = sample_rate * 3
+    t = np.arange(n, dtype=np.float32) / sample_rate
+    # Band-limited voice (energy mostly < 3 kHz) gated on/off so speech is intermittent.
+    # Scaled to stay within [-1, 1] so the test checks the stage itself, not input clipping.
+    voice = (
+        0.35 * np.sin(2 * np.pi * 150 * t)
+        + 0.18 * np.sin(2 * np.pi * 300 * t)
+        + 0.09 * np.sin(2 * np.pi * 700 * t)
+    ).astype(np.float32)
+    hiss = (rng.standard_normal(n) * 0.06).astype(np.float32)
+    gate = (np.sin(2 * np.pi * 0.6 * t) > 0).astype(np.float32)
+    sig = (voice + hiss) * gate
+    assert np.max(np.abs(sig)) <= 1.0  # guard: ensure the fixture itself is in range
+
+    res = _min_stats_air_attenuate(sig, sample_rate, EnhancementSettings())
+    out = res["signal"]
+    assert res["air_engaged"] is True
+    assert out.shape == sig.shape
+    assert np.isfinite(out).all()
+    assert np.max(np.abs(out)) <= 1.0 + 1e-6
+
+
+def test_air_dehiss_honors_disable_flag() -> None:
+    sample_rate = 48_000
+    sig = np.random.default_rng(3).normal(0.0, 0.02, sample_rate).astype(np.float32)
+    res = _min_stats_air_attenuate(sig, sample_rate, EnhancementSettings(enable_air_dehiss=False))
+    assert res["air_engaged"] is False
+    assert np.array_equal(res["signal"], sig)

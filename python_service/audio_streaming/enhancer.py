@@ -124,6 +124,39 @@ class EnhancementSettings:
     # Hard floor on attenuation so musical-noise / breath is not over-suppressed.
     maximum_attenuation_db: float = 18.0
 
+    # --- minimum-statistics "air" / hiss attenuator (no silence, no hardcoding) ---
+    # Listens for steady broadband hiss (the "air" you hear even on a finished master) and
+    # gently pulls it down. Unlike the VAD gate, this needs NO silence: per Martin (2001),
+    # the per-frequency-bin temporal MINIMUM of a smoothed power spectrum converges to the
+    # stationary noise floor, because speech is only intermittently present in each band.
+    # The floor is therefore purely signal-derived, every band independently, every run.
+    enable_air_dehiss: bool = True
+    # Start of the band this stage is allowed to touch (Hz). Speech energy is low above
+    # ~3.5 kHz, so the "air"/hiss region begins there. Below it we never subtract, so
+    # consonant body and presence are untouched. Derived per-run from sample_rate, not a
+    # fixed EQ frequency.
+    air_band_start_hz: float = 3500.0
+    # End of the band (Hz). Defaults to just under Nyquist so it covers the audible air.
+    air_band_end_hz: float = 16000.0
+    # How aggressively the estimated floor is subtracted (0..1). 1.0 = full Wiener-like
+    # subtraction of the floor (can thin the top), ~0.85 removes steady hiss while leaving
+    # the natural breath/air. Kept gentle to avoid a hollow top end.
+    air_subtract_factor: float = 0.85
+    # Bias (dB) added to the estimated floor before subtraction. 0.0 = subtract ONLY the
+    # per-band temporal-minimum floor (the safe choice: never touches the voice's own
+    # high-end energy). A positive bias would make the stage subtract speech transients
+    # too, hollowing the top -- so it is left at 0.
+    air_floor_bias_db: float = 0.0
+    # Per-band attenuation ceiling (dB) so we never over-gate the top and get a "tunnel"
+    # or underwater top end.
+    air_max_attenuation_db: float = 12.0
+    # STFT window for the floor estimate (samples @ 48 kHz this is ~46 ms, good temporal
+    # resolution for minima tracking).
+    air_stft_win: int = 2048
+    # Minimum statistics look-back window (seconds) over which the per-bin temporal
+    # minimum is taken. Longer = more stable floor, slower to adapt to level changes.
+    air_min_stats_seconds: float = 1.5
+
     # --- dynamics ---
     compressor_threshold_dbfs: float = -14.0
     compressor_ratio: float = 2.0
@@ -159,6 +192,10 @@ class EnhancementReport:
     # True when spectral noise reduction actually engaged (a usable noise floor was found
     # by the VAD and applied). False when the signal had no silence / no reliable noise.
     noise_reduced: bool = False
+    # True when the minimum-statistics "air"/hiss attenuator engaged. This runs regardless
+    # of silence (it derives the floor from per-band temporal minima), so it can fire on
+    # already-mastered recordings where the VAD gate stays off.
+    air_dehiss_engaged: bool = False
 
 
 def _dbfs(value: float) -> float:
@@ -588,6 +625,98 @@ def _spectral_enhance(
     return _enhance_dynamic(channel, sample_rate, settings)
 
 
+def _min_stats_air_attenuate(
+    channel: np.ndarray, sample_rate: int, settings: EnhancementSettings
+) -> dict:
+    """Dynamically estimate and gently subtract steady "air"/hiss in the high band.
+
+    No silence and no hardcoding required. Following Martin (2001) minimum statistics,
+    the per-frequency-bin *temporal minimum* of a smoothed power spectrum converges to the
+    stationary noise floor, because any given band is only intermittently excited by speech.
+    So even on a finished master with no quiet gaps, the high bins (where speech has little
+    energy) reveal their own hiss floor as the local temporal minimum. We subtract that
+    floor (scaled by ``air_subtract_factor``) only inside the high band, with a per-bin
+    attenuation ceiling, leaving speech body and presence untouched.
+
+    Returns a dict like ``_spectral_enhance`` so the caller can merge it uniformly.
+    """
+    if not settings.enable_air_dehiss:
+        return {"signal": channel.copy(), "air_engaged": False}
+    n = len(channel)
+    if n < settings.air_stft_win:
+        return {"signal": channel.copy(), "air_engaged": False}
+
+    win = settings.air_stft_win
+    hop = win // 4
+    noverlap = win - hop
+    # Power spectrum (magnitude^2); scipy STFT returns complex frames.
+    freqs, _, Zxx = stft(
+        channel.astype(np.float32), fs=sample_rate,
+        window="hann", nperseg=win, noverlap=noverlap, boundary="zeros", padded=True,
+    )
+    power = np.abs(Zxx) ** 2  # shape (n_bins, n_frames)
+    n_bins, n_frames = power.shape
+    if n_frames < 2:
+        return {"signal": channel.copy(), "air_engaged": False}
+
+    # --- adaptive band selection (no hardcoded EQ frequency list) ---
+    nyq = sample_rate / 2.0
+    f_start = min(settings.air_band_start_hz, nyq - 1.0)
+    f_end = min(settings.air_band_end_hz, nyq - 1.0)
+    if f_end <= f_start:
+        return {"signal": channel.copy(), "air_engaged": False}
+    band = (freqs >= f_start) & (freqs <= f_end)
+    band_idx = np.nonzero(band)[0]
+    if band_idx.size == 0:
+        return {"signal": channel.copy(), "air_engaged": False}
+
+    # --- minimum statistics over a sliding window of frames ---
+    # Per-bin smoothed PSD (exponential moving average) then a running temporal minimum
+    # over `air_min_stats_seconds` -> the stationary floor estimate per band per frame.
+    ema = power.copy()
+    alpha = 0.3  # smoothing for the running PSD estimate
+    ema[:, 0] = power[:, 0]
+    for t in range(1, n_frames):
+        ema[:, t] = (1 - alpha) * ema[:, t - 1] + alpha * power[:, t]
+
+    win_frames = max(2, int(round(settings.air_min_stats_seconds * sample_rate / hop)))
+    # Pad the temporal dimension so the minimum window is centred without look-ahead.
+    pad = win_frames - 1
+    padded = np.pad(ema, ((0, 0), (pad, 0)), mode="edge")
+    # Sliding minimum along frames using a 1-D uniform filter on the negation trick.
+    from scipy.ndimage import minimum_filter1d
+    min_psd = minimum_filter1d(padded, size=win_frames, axis=1, mode="nearest")[:, pad:]
+    floor = min_psd  # shape (n_bins, n_frames)
+
+    # --- attenuation gain per band ---
+    # Floor with a high-band bias (in linear power) so the subtraction is a touch stronger
+    # where hiss lives. target = floor * 10^(bias/10). ratio = target / (power + eps).
+    eps = 1e-10
+    bias_lin = 10.0 ** (settings.air_floor_bias_db / 10.0)
+    target = floor * bias_lin
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.clip(target / (power + eps), 0.0, 1.0)
+    gain = 1.0 - settings.air_subtract_factor * ratio
+    # Convert to dB attenuation and clamp to the ceiling so the top never goes "tunnel".
+    max_lin = 10.0 ** (-settings.air_max_attenuation_db / 20.0)
+    gain = np.clip(gain, max_lin, 1.0)
+    # Force identity (no change) outside the high band and at DC/Nyquist guard bins.
+    full_gain = np.ones_like(gain)
+    full_gain[band_idx, :] = gain[band_idx, :]
+
+    # --- apply and reconstruct (zero-phase via istft) ---
+    Zxx_proc = Zxx * full_gain
+    _, rec = istft(
+        Zxx_proc, fs=sample_rate, window="hann",
+        nperseg=win, noverlap=noverlap, input_onesided=True, boundary=True,
+    )
+    if rec.shape[0] > n:
+        rec = rec[:n]
+    elif rec.shape[0] < n:
+        rec = np.pad(rec, (0, n - rec.shape[0]))
+    return {"signal": rec.astype(np.float32, copy=False), "air_engaged": True}
+
+
 # ---------------------------------------------------------------------------
 # Dynamics: compressor + make-up + limiter
 # ---------------------------------------------------------------------------
@@ -634,6 +763,7 @@ def enhance_voice(
     noise_floor = -np.inf
     profile_seconds = 0.0
     noise_reduced = False
+    air_engaged = False
     detected_f0 = None
     for index in range(matrix.shape[1]):
         # 0. DC-block first: remove sub-sonic offset so RMS / pitch / spectral analysis
@@ -645,6 +775,11 @@ def enhance_voice(
         high_passed = _high_pass(dc_blocked, sample_rate, cutoff)
         stats = _spectral_enhance(high_passed, sample_rate, settings)
         signal = stats["signal"]
+        # 1b. Minimum-statistics "air"/hiss attenuator: runs regardless of silence, so it
+        # can pull down steady broadband hiss you hear on a finished master (where the VAD
+        # gate correctly stays off). The floor is per-band, signal-derived, no hardcoding.
+        air = _min_stats_air_attenuate(signal, sample_rate, settings)
+        signal = air["signal"]
         if settings.enable_dynamics:
             processed[:, index] = _compress_and_make_up(signal, settings)
         else:
@@ -655,6 +790,8 @@ def enhance_voice(
         profile_seconds = max(profile_seconds, stats["profile_seconds"])
         if stats.get("noise_reduced"):
             noise_reduced = True
+        if air.get("air_engaged"):
+            air_engaged = True
     output_peak = float(np.max(np.abs(processed)))
     output_rms = _rms(processed)
     result = processed[:, 0] if was_mono else processed
@@ -671,6 +808,7 @@ def enhance_voice(
         used_noise_profile_seconds=profile_seconds,
         detected_f0_hz=detected_f0,
         noise_reduced=noise_reduced,
+        air_dehiss_engaged=air_engaged,
     )
     return result, report
 
