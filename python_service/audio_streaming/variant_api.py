@@ -20,6 +20,7 @@ from fastapi.responses import PlainTextResponse
 
 from .api import optional_principal, require_admin, require_principal
 from .ingest import IngestError, asset_content_key, ingest_asset, segment_object_key
+from .billing import BillingError, BillingService, QuotaExceeded
 from .models import (
     EntitlementUpdate,
     VariantForensicRequest,
@@ -170,12 +171,55 @@ async def variant_playlist(
     session_id: str,
     cap: Annotated[str, Query(min_length=16)],
     principal: Annotated[Principal | None, Depends(optional_principal)],
+    position: Annotated[int, Query(ge=0)] = 0,
 ) -> PlainTextResponse:
+    """Serve a *windowed, metered* manifest.
+
+    Playback is metered per window, not per episode: the player passes ``position`` (the
+    segment index it is about to play), and we debit a bounded sliding window of about 5
+    minutes that starts there. Because signed CDN URLs expire, the player must return here to
+    fetch more; each return advances the window. Retries are idempotent (the grant ledger
+    de-dupes by ``(session, sequence)``), so replaying a window never double-charges.
+    When the listener's monthly allowance is exhausted, a 402 is returned so the client can
+    show an upgrade prompt.
+    """
+
     session = await _session_for_capability(request, principal, session_id, cap, "variant-playlist")
     service = _variant_service(request)
+    settings = _settings(request)
+    asset = await service.repository.get_variant_asset(session.asset_id)
+    if asset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found")
+    seconds_each = asset.segment_samples / asset.sample_rate
+    window = int(settings.cdn_url_ttl_seconds / seconds_each)
+    window = max(1, min(window, asset.segment_count - position)) if position < asset.segment_count else 0
+    sequences = list(range(position, min(position + window, asset.segment_count)))
+    billing = BillingService(service.repository)
     started = time.perf_counter()
     try:
-        manifest = await service.manifest(session)
+        auth = await billing.authorize_playback(
+            session_id=session_id,
+            user_id=session.user_id,
+            asset_id=session.asset_id,
+            sequences=sequences,
+            seconds_each=int(round(asset.segment_samples / asset.sample_rate)),
+            now=int(time.time()),
+        )
+    except QuotaExceeded as exc:
+        latency_ms = (time.perf_counter() - started) * 1000
+        await service.repository.audit(
+            "variant_manifest_denied", "quota", session_id=session_id, asset_id=session.asset_id,
+            user_id=session.user_id, latency_ms=latency_ms, details={"reason": str(exc)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=str(exc),
+            headers={"Cache-Control": "private, no-store"},
+        ) from exc
+    except BillingError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    try:
+        manifest = await service.manifest_window(session, sequences)
     except ServiceError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     latency_ms = (time.perf_counter() - started) * 1000
@@ -183,12 +227,72 @@ async def variant_playlist(
     await service.repository.audit(
         "variant_manifest_issued", "success", session_id=session_id, asset_id=session.asset_id,
         user_id=session.user_id, latency_ms=latency_ms,
+        details={"position": position, "window": len(sequences), "granted": auth.newly_granted},
     )
     return PlainTextResponse(
         manifest,
         media_type="application/vnd.apple.mpegurl",
-        headers={"Cache-Control": "private, no-store"},
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Plan-Code": auth.plan_code,
+            "X-Consumed-Seconds": str(auth.consumed_seconds),
+            "X-Window-Position": str(position),
+            "X-Window-Count": str(len(sequences)),
+        },
     )
+
+
+# --- P2: billing administration (all pricing lives in DB rows, never constants) -
+
+def _billing_service(request: Request) -> BillingService:
+    return BillingService(request.app.state.repository)
+
+
+@router.get("/plans")
+async def list_plans(
+    request: Request, _: Annotated[Principal, Depends(require_admin)], active_only: bool = True,
+) -> list[dict]:
+    return await request.app.state.repository.list_plans(active_only=active_only)
+
+
+@router.put("/plans/{plan_code}")
+async def update_plan(
+    request: Request, plan_code: str, body: dict, _: Annotated[Principal, Depends(require_admin)],
+) -> dict:
+    """Edit a plan's price or included hours at runtime (this is how X/Y/Z change)."""
+
+    plan = await request.app.state.repository.get_plan(plan_code)
+    if plan is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="plan not found")
+    updated = dict(plan)
+    for key in ("name", "price_paise", "included_seconds", "active"):
+        if key in body:
+            updated[key] = body[key]
+    await request.app.state.repository.upsert_plan(updated)
+    return updated
+
+
+@router.post("/creators", status_code=status.HTTP_201_CREATED)
+async def create_creator(
+    request: Request, body: dict, _: Annotated[Principal, Depends(require_admin)],
+) -> dict:
+    creator_id = body.get("creator_id")
+    if not creator_id or not isinstance(creator_id, str):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="creator_id required")
+    await request.app.state.repository.create_creator(
+        creator_id, body.get("display_name", creator_id), body.get("payout_reference"),
+    )
+    await request.app.state.repository.set_asset_creator(body.get("asset_id"), creator_id)
+    return {"creator_id": creator_id}
+
+
+@router.post("/payouts/compute")
+async def compute_payout(
+    request: Request, period: str, _: Annotated[Principal, Depends(require_admin)],
+) -> dict:
+    """Compute and persist creator payouts for a monthly period (YYYY-MM)."""
+
+    return await _billing_service(request).compute_payout(period)
 
 
 @router.get("/variant-streams/{session_id}/keys/main")

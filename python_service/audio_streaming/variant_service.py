@@ -148,8 +148,8 @@ class VariantStreamingService:
         base = self.settings.cdn_base_url or "/v1/cdn"
         return f"{base.rstrip('/')}/{key}?{signature}"
 
-    async def manifest(self, session: SessionRecord) -> str:
-        """Render the listener's personalized playlist of pre-published variant segments."""
+    async def manifest_window(self, session: SessionRecord, sequences: list[int]) -> str:
+        """Render a windowed playlist over the given segment indices (metering-friendly)."""
 
         asset = await self.repository.get_variant_asset(session.asset_id)
         if asset is None:
@@ -159,14 +159,9 @@ class VariantStreamingService:
         expires_at = min(int(time.time()) + self.settings.cdn_url_ttl_seconds, session.expires_at)
         key_query = urlencode({"cap": self.capability("variant-key", session)})
         key_uri = f"/v1/variant-streams/{session.session_id}/keys/main?{key_query}"
-        lines = [
-            "#EXTM3U",
-            "#EXT-X-VERSION:3",
-            f"#EXT-X-TARGETDURATION:{int(duration) + 1}",
-            "#EXT-X-MEDIA-SEQUENCE:0",
-            "#EXT-X-PLAYLIST-TYPE:VOD",
-        ]
-        for sequence in range(asset.segment_count):
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{int(duration) + 1}",
+                 "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD"]
+        for sequence in sequences:
             variant = watermarker.variant_for(session.watermark_id, sequence)
             iv = asset_content_iv(asset.asset_id, sequence, variant).hex()
             lines.append(f'#EXT-X-KEY:METHOD=AES-128,URI="{key_uri}",IV=0x{iv}')
@@ -176,6 +171,14 @@ class VariantStreamingService:
         async with self._lock:
             self._metrics["manifests_issued"] += 1
         return "\n".join(lines) + "\n"
+
+    async def manifest(self, session: SessionRecord) -> str:
+        """Render the full personalized playlist (kept for completeness; playback uses windows)."""
+
+        asset = await self.repository.get_variant_asset(session.asset_id)
+        if asset is None:
+            raise ServiceError("asset not found", 404)
+        return await self.manifest_window(session, list(range(asset.segment_count)))
 
     async def record_latency(self, latency_ms: float) -> None:
         async with self._lock:

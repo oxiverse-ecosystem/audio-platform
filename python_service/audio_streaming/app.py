@@ -13,6 +13,7 @@ from .api import router as streaming_router
 from .enhance import router as enhance_router
 from .cache import RequestRateLimiter
 from .config import Settings
+from .billing import SEED_CONFIG, SEED_PLANS
 from .repository import Repository
 from .service import StreamingService
 from .storage import build_object_store
@@ -36,6 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.object_store = build_object_store(resolved_settings)
         app.state.variant_service = VariantStreamingService(resolved_settings, repository, app.state.object_store)
         app.state.request_limiter = RequestRateLimiter(resolved_settings.request_limit_per_minute)
+        # P2: seed pricing/plans only where absent so runtime edits survive restarts.
+        await repository.seed_billing(SEED_CONFIG, SEED_PLANS)
         yield
         await app.state.streaming_service.close()
         await repository.close()
