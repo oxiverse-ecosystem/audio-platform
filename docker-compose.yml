@@ -1,0 +1,59 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: oxiverse
+      POSTGRES_PASSWORD: oxiverse
+      POSTGRES_DB: oxiverse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oxiverse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      AUDIO_ENV: production
+      AUDIO_DATABASE_URL: postgresql://oxiverse:oxiverse@postgres:5432/oxiverse
+      AUDIO_REDIS_URL: redis://redis:6379/0
+      AUDIO_CDN_BASE_URL: ${AUDIO_CDN_BASE_URL:-}
+      AUDIO_AUTH_SECRET: ${AUDIO_AUTH_SECRET:-change-me-auth-0123456789abcdef0123456789abcdef}
+      AUDIO_CAPABILITY_SECRET: ${AUDIO_CAPABILITY_SECRET:-change-me-cap-0123456789abcdef0123456789abcdef}
+      AUDIO_WATERMARK_SECRET: ${AUDIO_WATERMARK_SECRET:-change-me-wm-0123456789abcdef0123456789abcdef}
+      AUDIO_SEGMENT_KEY_SECRET: ${AUDIO_SEGMENT_KEY_SECRET:-change-me-key-0123456789abcdef0123456789abcdef}
+      AUDIO_OBJECT_STORE_BACKEND: ${AUDIO_OBJECT_STORE_BACKEND:-local}
+      AUDIO_OBJECT_STORE_BUCKET: ${AUDIO_OBJECT_STORE_BUCKET:-}
+      AUDIO_OBJECT_STORE_ENDPOINT: ${AUDIO_OBJECT_STORE_ENDPOINT:-}
+      AUDIO_OBJECT_STORE_ACCESS_KEY: ${AUDIO_OBJECT_STORE_ACCESS_KEY:-}
+      AUDIO_OBJECT_STORE_SECRET_KEY: ${AUDIO_OBJECT_STORE_SECRET_KEY:-}
+    ports:
+      - "8000:8000"
+    # Migrations run once before the API starts (idempotent; safe to re-run).
+    command: >
+      sh -c "python python_service/migrate.py &&
+             python -m uvicorn audio_streaming.app:app --host 0.0.0.0 --port 8000 --workers 4"
+
+volumes:
+  pgdata:

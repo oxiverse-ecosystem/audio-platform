@@ -1,30 +1,70 @@
-# Secure Audio Streaming MVP Source Package
+# Oxiverse Audio — backend (secure_audio_streaming_mvp_source)
 
-This repository contains a Python-first source MVP for **entitlement-controlled, session-personalized HLS audio streaming** and a separate, conservative **pure-DSP mobile voice enhancement** baseline.
+A privacy-first, CDN-cacheable A/B variant-watermarked audio streaming backend with server-
+authoritative playback metering and pool-only creator payouts. See `docs/` for the architecture
+decisions; this file is the run/operate guide.
 
-| Component | Source location | Purpose |
-| --- | --- | --- |
-| Async streaming service | `python_service/audio_streaming/` | FastAPI/ASGI APIs, HLS manifests, session capabilities, AES-128 segment encryption, stateful keyed watermark embedding, caches, worker limits, and audit persistence. |
-| Watermark implementation | `python_service/audio_streaming/watermark.py` | Exact 32-bit ID codeword with header/CRC and deterministic keyed, overlap-add carrier embedding/recovery for controlled fixtures. |
-| Voice enhancement | `python_service/audio_streaming/enhancer.py` | High-pass filtering, conservative stationary-noise spectral attenuation, peak compression, and limited make-up gain. |
-| Tests | `python_service/tests/` | Authorization, encrypted/key delivery, token determinism, controlled recovery, boundaries, concurrency, and enhancer regression tests. |
-| Operations documentation | `python_service/README.md` and `docs/research_notes.md` | Threat model, HLS encryption, deployment topology, key rotation, capacity controls, sources, and limitations. |
+## Layout
 
-## Install and verify
+- `python_service/audio_streaming/` — FastAPI app, variant streaming, billing/metering, Postgres +
+  Redis adapters, observability.
+- `python_service/migrations/0001_schema.sql` — Postgres DDL (idempotent; re-runnable).
+- `python_service/tests/` — unit + integration tests (ffmpeg-based codec tests included).
+- `cloudflare_worker/` — edge signed-URL gate matching the origin signer.
+- `frontend/` — React + Vite + HLS.js test console (catalog, metered player, usage, admin).
+- `docker-compose.yml` / `Dockerfile` — multi-replica deployment (api + postgres + redis).
+- `.github/workflows/ci.yml` — test + docker build on push/PR.
+
+## Local dev (SQLite, zero dependencies)
 
 ```bash
 cd python_service
-python3 -m venv .venv
-. .venv/bin/activate
+python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
-PYTHONPATH=. pytest -q
-uvicorn audio_streaming.app:app --host 127.0.0.1 --port 8000
+# 32+ char secrets are required; the dev defaults are fine for local only
+uvicorn audio_streaming.app:app --port 8000 --reload
 ```
 
-Install `ffmpeg` and the `libsndfile` runtime through the operating-system package manager before starting the HLS server. The nested `python_service/Dockerfile` is a reference image for an external container platform; the project’s managed web preview is not positioned as high-throughput media infrastructure.
+The app seeds plans (`free` = 10h, `listener_50` = ₹499/50h) on first boot and serves:
+- `GET  /v1/assets` — catalog
+- `POST /v1/dev-login` — issue a test identity (listener|admin); **disabled in production**
+- `GET  /v1/usage` — current listener's consumed/included seconds
+- `GET  /v1/plans` (admin), `PUT /v1/plans/{code}` — edit price/hours live (no deploy)
+- `POST /v1/creators`, `POST /v1/payouts/compute?period=YYYY-MM`
+- `GET  /metrics` — Prometheus exposition
 
-## Validation boundaries
+To ingest an asset (admin): `POST /v1/variant-assets` (multipart, `asset_id`, `title`, `upload`).
+The dev-only `GET /v1/cdn/{object_key}?exp=&sig=` stands in for Cloudflare locally.
 
-The test suite confirms code-level behavior under controlled fixtures. It **does not** establish watermark imperceptibility, robustness to re-encoding, replay, trimming, TSM, or attack removal, nor does it report Pd/Pfa. It also does not establish voice-quality improvements such as PESQ/STOI/SI-SDR/LUFS. Earlier unsupported watermark figures are intentionally excluded.
+## Production (Postgres + Redis + Cloudflare)
 
-See [the streaming README](python_service/README.md) and [the enhancer README](python_service/README_ENHANCER.md) before using the code in a production decision.
+```bash
+cp .env.example .env   # fill 32+ char secrets
+docker compose up --build
+```
+
+- `AUDIO_DATABASE_URL` switches the repository to Postgres (asyncpg, `SELECT ... FOR UPDATE`
+  metering so concurrent replicas cannot double-grant).
+- `AUDIO_REDIS_URL` switches the rate limiter to a cluster-wide Redis sliding window.
+- `AUDIO_CDN_BASE_URL` points the manifests at Cloudflare R2 (signed URLs); deploy
+  `cloudflare_worker/` to enforce the same signature at the edge.
+
+## Frontend test console
+
+```bash
+cd frontend
+npm install && npm run dev   # proxies /v1 to :8000
+```
+
+Log in with a user id (role listener or admin), browse the catalog, press **Play (metered)** to
+stream via the windowed manifest, and watch the usage bar advance. As an admin you can edit plans
+live and compute a payout period.
+
+## Test matrix
+
+- P0 — A/B variant watermarking, 48 kHz stereo, CDN cacheable (codec e2e + forensic recovery).
+- P2 — plans as DB rows, idempotent windowed metering (retry = no double charge), 402 on quota,
+  pool-only payouts bounded by net revenue.
+- P4 — JSON logging, `/metrics`, Postgres + Redis adapters, hardened Docker, CI.
+
+`pytest` runs the whole suite; the codec tests need `ffmpeg` on PATH.

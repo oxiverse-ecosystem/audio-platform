@@ -1,39 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-
-# Test / cache
-.pytest_cache/
-.cache/
-.coverage
-htmlcov/
-
-# Virtualenvs / local
-.venv/
-venv/
-env/
-
-# Secrets / config
-*.env
-secrets/
-.env.*
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Large media (never commit audio artifacts)
-*.mp3
-*.wav
-*.flac
-*.ogg
-*.m4a
-
-# Local temp / data
-data/
+frontend/node_modules/
+frontend/dist/
+python_service/runtime-data/
 *.db
 *.sqlite
+__pycache__/
+*.pyc
+.env

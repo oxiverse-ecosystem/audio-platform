@@ -1,0 +1,12 @@
+python_service/runtime-data
+python_service/**/__pycache__
+**/__pycache__
+**/*.pyc
+.git
+.github
+node_modules
+frontend/dist
+frontend/node_modules
+*.sqlite
+*.db
+.DS_Store

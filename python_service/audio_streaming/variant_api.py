@@ -29,7 +29,7 @@ from .models import (
     VariantSessionRequest,
     VariantSessionResponse,
 )
-from .security import Principal, SecurityError, verify_signed_token
+from .security import Principal, SecurityError, issue_identity, verify_signed_token
 from .service import ServiceError
 from .storage import StorageError, verify_object_url
 from .variant_watermark import VariantWatermarker
@@ -393,6 +393,70 @@ async def verify_variant_attribution(
 @router.get("/variant-operations/metrics")
 async def variant_metrics(request: Request, _: Annotated[Principal, Depends(require_admin)]) -> dict[str, float]:
     return await _variant_service(request).metrics()
+
+
+# --- P4: lightweight endpoints the test client and operator console consume ---------
+
+@router.get("/assets", tags=["catalog"])
+async def list_assets(
+    request: Request, principal: Annotated[Principal, Depends(optional_principal)],
+) -> dict:
+    """Public-ish catalog of published variant assets, enriched with creator attribution.
+
+    Identity is optional; the catalog listing itself is safe to reveal (titles, creators,
+    durations) for browsing. Entitlement is still enforced at playback time.
+    """
+
+    repo = request.app.state.repository
+    assets = await repo.list_variant_assets()
+    enriched = []
+    for a in assets:
+        creator_id = await repo.get_asset_creator(a["asset_id"])
+        enriched.append({
+            **a,
+            "creator_id": creator_id,
+            "duration_seconds": a["duration_samples"] / a["sample_rate"],
+        })
+    return {"assets": enriched}
+
+
+@router.post("/dev-login", tags=["auth"])
+async def dev_login(request: Request, body: dict) -> dict:
+    """Issue a signed identity token for local testing. NOT for production use.
+
+    Production must replace this with a real IdP (OAuth/Otp) — see P3. The role may be
+    'listener' or 'admin' so the test client can exercise both planes.
+    """
+
+    if request.app.state.settings.environment == "production":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="not found")
+    subject = str(body.get("user_id") or "test-listener")
+    role = "admin" if body.get("role") == "admin" else "listener"
+    token = issue_identity(request.app.state.settings.auth_secret, subject, role=role)
+    return {"user_id": subject, "role": role, "token": token}
+
+
+@router.get("/usage", tags=["billing"])
+async def get_usage(
+    request: Request, principal: Annotated[Principal, Depends(require_principal)],
+) -> dict:
+    """Current listener's consumed vs included seconds for the active period."""
+
+    from .billing import period_key
+    repo = request.app.state.repository
+    period = period_key()
+    consumed = await repo.consumed_seconds(principal.subject, period)
+    # Resolve the active plan's allowance for the response.
+    now = int(time.time())
+    sub = await repo.active_platform_subscription(principal.subject, now)
+    included = sub["included_seconds"] if sub else (await repo.get_plan("free") or {}).get("included_seconds")
+    return {
+        "user_id": principal.subject,
+        "period_key": period,
+        "consumed_seconds": consumed,
+        "included_seconds": included,
+        "remaining_seconds": (included - consumed) if included is not None else None,
+    }
 
 
 __all__ = ["router", "segment_object_key"]

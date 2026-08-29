@@ -360,6 +360,13 @@ class Repository:
             row = self._db().execute("SELECT * FROM variant_assets WHERE asset_id=?", (asset_id,)).fetchone()
         return VariantAssetRecord(**dict(row)) if row else None
 
+    async def list_variant_assets(self) -> list[dict[str, Any]]:
+        async with self._lock:
+            rows = self._db().execute(
+                "SELECT asset_id,title,sample_rate,channels,segment_count,duration_samples,created_at "
+                "FROM variant_assets ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
     async def set_variant_entitlement(self, asset_id: str, user_id: str, allowed: bool) -> None:
         async with self._lock:
             self._db().execute(
