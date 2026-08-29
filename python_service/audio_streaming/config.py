@@ -41,9 +41,34 @@ class Settings:
     session_ttl_seconds: int = 20 * 60
     max_active_sessions_per_user: int = 4
 
+    # --- Production A/B variant streaming path (CDN-backed, 48 kHz stereo) ---
+    variant_sample_rate: int = 48_000
+    variant_channels: int = 2
+    variant_frame_samples: int = 4_096
+    variant_segment_seconds: float = 4.0
+    variant_bitrate: str = "128k"
+    variant_watermark_strength: float = 0.0025
+    ingest_max_bytes: int = 512 * 1024 * 1024
+    ingest_max_duration_seconds: int = 6 * 60 * 60
+    cdn_base_url: str = ""
+    cdn_url_ttl_seconds: int = 300
+    object_store_backend: str = "local"
+    object_store_bucket: str = ""
+    object_store_endpoint: str = ""
+    object_store_access_key: str = ""
+    object_store_secret_key: str = ""
+
     @property
     def segment_samples(self) -> int:
         return self.frame_samples * self.frames_per_segment
+
+    @property
+    def variant_segment_samples(self) -> int:
+        """Segment length aligned to a whole number of watermark analysis frames."""
+
+        raw = int(self.variant_sample_rate * self.variant_segment_seconds)
+        hop = self.variant_frame_samples // 2
+        return max(hop * 2, (raw // hop) * hop)
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -71,6 +96,21 @@ class Settings:
             capability_ttl_seconds=int(os.getenv("AUDIO_CAPABILITY_TTL_SECONDS", "120")),
             session_ttl_seconds=int(os.getenv("AUDIO_SESSION_TTL_SECONDS", str(20 * 60))),
             max_active_sessions_per_user=int(os.getenv("AUDIO_MAX_ACTIVE_SESSIONS_PER_USER", "4")),
+            variant_sample_rate=int(os.getenv("AUDIO_VARIANT_SAMPLE_RATE", "48000")),
+            variant_channels=int(os.getenv("AUDIO_VARIANT_CHANNELS", "2")),
+            variant_frame_samples=int(os.getenv("AUDIO_VARIANT_FRAME_SAMPLES", "4096")),
+            variant_segment_seconds=float(os.getenv("AUDIO_VARIANT_SEGMENT_SECONDS", "4.0")),
+            variant_bitrate=os.getenv("AUDIO_VARIANT_BITRATE", "128k"),
+            variant_watermark_strength=float(os.getenv("AUDIO_VARIANT_WATERMARK_STRENGTH", "0.0025")),
+            ingest_max_bytes=int(os.getenv("AUDIO_INGEST_MAX_BYTES", str(512 * 1024 * 1024))),
+            ingest_max_duration_seconds=int(os.getenv("AUDIO_INGEST_MAX_DURATION_SECONDS", str(6 * 60 * 60))),
+            cdn_base_url=os.getenv("AUDIO_CDN_BASE_URL", "").strip(),
+            cdn_url_ttl_seconds=int(os.getenv("AUDIO_CDN_URL_TTL_SECONDS", "300")),
+            object_store_backend=os.getenv("AUDIO_OBJECT_STORE_BACKEND", "local").strip().lower(),
+            object_store_bucket=os.getenv("AUDIO_OBJECT_STORE_BUCKET", "").strip(),
+            object_store_endpoint=os.getenv("AUDIO_OBJECT_STORE_ENDPOINT", "").strip(),
+            object_store_access_key=os.getenv("AUDIO_OBJECT_STORE_ACCESS_KEY", ""),
+            object_store_secret_key=os.getenv("AUDIO_OBJECT_STORE_SECRET_KEY", ""),
         )
         if settings.sample_rate <= 0 or settings.channels != 1:
             raise RuntimeError("This MVP accepts only mono PCM normalization at a positive sample rate")
@@ -78,4 +118,19 @@ class Settings:
             raise RuntimeError("Segment samples must align to whole watermark frames")
         if settings.worker_concurrency < 1 or settings.worker_concurrency > 16:
             raise RuntimeError("AUDIO_WORKER_CONCURRENCY must be between 1 and 16")
+        if settings.variant_channels not in (1, 2):
+            raise RuntimeError("AUDIO_VARIANT_CHANNELS must be 1 or 2")
+        if settings.variant_frame_samples % 2 != 0:
+            raise RuntimeError("AUDIO_VARIANT_FRAME_SAMPLES must be even for overlap-add embedding")
+        if settings.variant_segment_samples % (settings.variant_frame_samples // 2) != 0:
+            raise RuntimeError("Variant segment length must align to whole watermark hops")
+        if settings.object_store_backend not in ("local", "s3"):
+            raise RuntimeError("AUDIO_OBJECT_STORE_BACKEND must be 'local' or 's3'")
+        if settings.object_store_backend == "s3" and not (
+            settings.object_store_bucket and settings.object_store_endpoint
+            and settings.object_store_access_key and settings.object_store_secret_key
+        ):
+            raise RuntimeError("S3/R2 object storage requires bucket, endpoint, and credentials")
+        if environment == "production" and not settings.cdn_base_url:
+            raise RuntimeError("AUDIO_CDN_BASE_URL must be provided in production")
         return settings

@@ -108,3 +108,62 @@ class SessionRecord:
     expires_at: int
     status: Literal["active", "revoked", "expired"]
 
+
+@dataclass(frozen=True)
+class VariantAssetRecord:
+    """An asset whose segments are pre-published as two watermarked CDN variants."""
+
+    asset_id: str
+    title: str
+    source_sha256: str
+    sample_rate: int
+    channels: int
+    segment_samples: int
+    segment_count: int
+    duration_samples: int
+    created_at: int
+
+
+class VariantIngestResponse(BaseModel):
+    asset_id: str
+    title: str
+    sample_rate: int
+    channels: int
+    segment_count: int
+    duration_seconds: float
+    segment_duration_seconds: float
+    published_objects: int
+
+
+class VariantSessionRequest(BaseModel):
+    asset_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,95}$")
+
+
+class VariantSessionResponse(BaseModel):
+    session_id: str
+    asset_id: str
+    expires_at: int
+    manifest_url: str
+
+
+class VariantForensicSegment(BaseModel):
+    """One recovered segment: its index plus base64 PCM float32 samples."""
+
+    sequence: int = Field(ge=0)
+    samples_b64: str = Field(min_length=1)
+
+
+class VariantForensicRequest(BaseModel):
+    asset_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{2,95}$")
+    segments: list[VariantForensicSegment] = Field(min_length=1, max_length=512)
+
+
+class VariantForensicResponse(BaseModel):
+    watermark_id: int | None = None
+    crc_valid: bool
+    matched: bool
+    session_id: str | None = None
+    user_audit_hash: str | None = None
+    created_at: int | None = None
+
+

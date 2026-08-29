@@ -1,0 +1,11 @@
+name = "audio-variant-cdn"
+main = "src/index.js"
+compatibility_date = "2026-01-01"
+
+# The bucket holding immutable A/B variant segments written by the ingest pipeline.
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "audio-variants"
+
+# SIGNING_SECRET must equal the origin's AUDIO_CAPABILITY_SECRET. Set it as a secret, never here:
+#   wrangler secret put SIGNING_SECRET

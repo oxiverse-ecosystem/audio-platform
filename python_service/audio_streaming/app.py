@@ -15,6 +15,9 @@ from .cache import RequestRateLimiter
 from .config import Settings
 from .repository import Repository
 from .service import StreamingService
+from .storage import build_object_store
+from .variant_api import router as variant_router
+from .variant_service import VariantStreamingService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -30,6 +33,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = resolved_settings
         app.state.repository = repository
         app.state.streaming_service = StreamingService(resolved_settings, repository)
+        app.state.object_store = build_object_store(resolved_settings)
+        app.state.variant_service = VariantStreamingService(resolved_settings, repository, app.state.object_store)
         app.state.request_limiter = RequestRateLimiter(resolved_settings.request_limit_per_minute)
         yield
         await app.state.streaming_service.close()
@@ -74,7 +79,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 pass
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Process-Time-Ms"] = f"{(time.perf_counter() - started) * 1000:.2f}"
-        response.headers["Cache-Control"] = "no-store"
+        # Default to no-store for the private API, but never override a route that has
+        # deliberately marked its response publicly cacheable (immutable CDN objects).
+        if "cache-control" not in response.headers:
+            response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.get("/healthz", tags=["operations"])
@@ -82,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok", "service": "session-watermarked-hls"}
 
     app.include_router(streaming_router)
+    app.include_router(variant_router)
     app.include_router(enhance_router)
     return app
 
