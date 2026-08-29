@@ -264,7 +264,8 @@ class PostgresRepository:
     async def create_creator(self, creator_id: str, display_name: str, payout_reference: str | None) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "INSERT INTO creators(creator_id,display_name,payout_reference,created_at) VALUES($1,$2,$3,$4)",
+                "INSERT INTO creators(creator_id,display_name,payout_reference,created_at) "
+                "VALUES($1,$2,$3,$4) ON CONFLICT(creator_id) DO NOTHING",
                 creator_id, display_name, payout_reference, int(time.time()))
 
     async def set_asset_creator(self, asset_id: str, creator_id: str) -> None:
@@ -331,10 +332,10 @@ class PostgresRepository:
                 # Ensure the usage row exists, then lock it.
                 await conn.execute(
                     """INSERT INTO usage_periods(user_id,period_key,consumed_seconds,updated_at)
-                    VALUES($1,$2,0,$3) ON CONFLICT(user_id,period_key) DO NOTHING""",
+                    VALUES($1::text,$2::text,0,$3::bigint) ON CONFLICT(user_id,period_key) DO NOTHING""",
                     user_id, period, now)
                 consumed_row = await conn.fetchrow(
-                    "SELECT consumed_seconds FROM usage_periods WHERE user_id=$1 AND period_key=$2 FOR UPDATE",
+                    "SELECT consumed_seconds FROM usage_periods WHERE user_id=$1::text AND period_key=$2::text FOR UPDATE",
                     user_id, period)
                 consumed = int(consumed_row["consumed_seconds"])
 
@@ -342,8 +343,8 @@ class PostgresRepository:
                 if sequences:
                     placeholders = ",".join(f"${i+3}" for i in range(len(sequences)))
                     rows = await conn.fetch(
-                        f"SELECT sequence FROM segment_grants WHERE session_id=$1 AND sequence IN ({placeholders})",
-                        session_id, *sequences)
+                        f"SELECT sequence FROM segment_grants WHERE session_id=$1::text AND sequence = ANY($2::int[])",
+                        session_id, sequences)
                     existing = {int(r["sequence"]) for r in rows}
                 fresh = [s for s in sequences if s not in existing]
 
@@ -355,17 +356,18 @@ class PostgresRepository:
 
                 debit = len(fresh) * seconds_each
                 await conn.executemany(
-                    "INSERT INTO segment_grants(session_id,sequence,seconds,granted_at) VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+                    "INSERT INTO segment_grants(session_id,sequence,seconds,granted_at) "
+                    "VALUES($1::text,$2::int,$3::int,$4::bigint) ON CONFLICT DO NOTHING",
                     [(session_id, sequence, seconds_each, now) for sequence in fresh])
                 if included_seconds is not None:
                     await conn.execute(
                         """INSERT INTO usage_periods(user_id,period_key,consumed_seconds,updated_at)
-                        VALUES($1,$2,$3,$4)
+                        VALUES($1::text,$2::text,$3::int,$4::bigint)
                         ON CONFLICT(user_id,period_key) DO UPDATE SET consumed_seconds = usage_periods.consumed_seconds + EXCLUDED.consumed_seconds""",
                         user_id, period, debit, now)
                 if creator_id is not None:
                     await conn.execute(
-                        """INSERT INTO creator_usage(creator_id,period_key,user_id,seconds) VALUES($1,$2,$3,$4)
+                        """INSERT INTO creator_usage(creator_id,period_key,user_id,seconds) VALUES($1::text,$2::text,$3::text,$4::int)
                         ON CONFLICT(creator_id,period_key,user_id) DO UPDATE SET seconds = creator_usage.seconds + EXCLUDED.seconds""",
                         creator_id, period, user_id, debit)
                 return len(fresh), consumed + (debit if included_seconds is not None else 0)

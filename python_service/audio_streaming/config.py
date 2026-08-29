@@ -132,5 +132,13 @@ class Settings:
         ):
             raise RuntimeError("S3/R2 object storage requires bucket, endpoint, and credentials")
         if environment == "production" and not settings.cdn_base_url:
-            raise RuntimeError("AUDIO_CDN_BASE_URL must be provided in production")
+            # Self-hosted (no Cloudflare) is allowed: segments are served from the origin
+            # /v1/cdn signed path. A real Cloudflare edge gate is recommended for scale, but
+            # refusing to boot would block legitimate single-node deployments.
+            import logging
+
+            logging.getLogger("audio_streaming.config").warning(
+                "AUDIO_CDN_BASE_URL is not set; serving signed segments from the origin "
+                "/v1/cdn path instead of Cloudflare. Set it to move delivery to the edge."
+            )
         return settings

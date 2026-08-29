@@ -29,7 +29,8 @@ USER appuser
 
 ENV AUDIO_ENV=production \
     AUDIO_DATA_DIR=/app/runtime-data \
-    AUDIO_DATABASE_PATH=/app/runtime-data/streaming.db
+    AUDIO_DATABASE_PATH=/app/runtime-data/streaming.db \
+    PYTHONPATH=/app/python_service
 
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

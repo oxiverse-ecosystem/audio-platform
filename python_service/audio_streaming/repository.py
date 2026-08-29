@@ -495,7 +495,7 @@ class Repository:
     async def create_creator(self, creator_id: str, display_name: str, payout_reference: str | None) -> None:
         async with self._lock:
             self._db().execute(
-                "INSERT INTO creators(creator_id,display_name,payout_reference,created_at) VALUES(?,?,?,?)",
+                "INSERT OR IGNORE INTO creators(creator_id,display_name,payout_reference,created_at) VALUES(?,?,?,?)",
                 (creator_id, display_name, payout_reference, int(time.time())),
             )
             self._db().commit()
