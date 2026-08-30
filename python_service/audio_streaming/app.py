@@ -11,10 +11,13 @@ from fastapi.responses import JSONResponse
 
 from .api import router as streaming_router
 from .enhance import router as enhance_router
+from .upload import router as upload_router
 from .cache import RequestRateLimiter
 from .config import Settings
 from .repository import Repository
+from .jobs import JobsRepository
 from .service import StreamingService
+from .store import build_signer, build_store
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -27,8 +30,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         resolved_settings.data_dir.mkdir(parents=True, exist_ok=True)
         repository = Repository(resolved_settings.database_path)
         await repository.initialize()
+        jobs_repository = JobsRepository(resolved_settings.data_dir / "jobs.db")
+        await jobs_repository.initialize()
+        media_store = build_store(resolved_settings)
+        url_signer = build_signer(resolved_settings)
         app.state.settings = resolved_settings
         app.state.repository = repository
+        app.state.jobs_repository = jobs_repository
+        app.state.media_store = media_store
+        app.state.url_signer = url_signer
         app.state.streaming_service = StreamingService(resolved_settings, repository)
         app.state.request_limiter = RequestRateLimiter(resolved_settings.request_limit_per_minute)
         yield
@@ -83,6 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(streaming_router)
     app.include_router(enhance_router)
+    app.include_router(upload_router)
     return app
 
 
