@@ -398,6 +398,19 @@ class MasteringSettings:
     # Final limiter.
     enable_limiter: bool = True
 
+    # --- adaptive intensity gate (clean-voice insurance) ---
+    # When True, the de-esser and multiband-compressor intensities are scaled by a
+    # *cleanliness* factor derived from the enhancer's own observations. A clean recording
+    # (clean noise floor, genuine speech/pause gaps, weak room resonance, bright highs)
+    # scores ~1.0 and gets the FULL preset; a noisy/reverberant capture scores ->0 and the
+    # de-esser + MBC are dialed DOWN so they never thin an already-good founder voice while
+    # the noisy one still gets the rescue. This is the "never over-process clean audio"
+    # guarantee. The factor itself is fully signal-derived (see ``_cleanliness_factor``).
+    adaptive_intensity: bool = True
+    # Floor on the intensity scale so even a clean take still applies a gentle baseline
+    # (we never fully disable de-essing/MBC -- 0.0 would risk sibilance on any take).
+    adaptive_intensity_floor: float = 0.35
+
 
 @dataclass(frozen=True)
 class MasteringReport:
@@ -407,6 +420,9 @@ class MasteringReport:
     output_true_peak_dbfs: float
     gain_to_target_db: float
     clipped_after: bool
+    # 1.0 = clean recording got full preset; lower = noisier, intensity scaled down.
+    # Reported for observability / tuning; not a quality claim.
+    cleanliness: float = 1.0
 
 
 def _true_peak(x: np.ndarray, fs: float) -> float:
@@ -542,10 +558,60 @@ def _dynamic_compressor_threshold(x_mono: np.ndarray, sample_rate: int, base_db:
     return float(max(-40.0, min(-6.0, speech_rms_db - 6.0)))
 
 
+def _cleanliness_factor(
+    x_mono: np.ndarray,
+    sample_rate: int,
+    settings: MasteringSettings,
+    noise_floor_dbfs: float | None = None,
+) -> float:
+    """Signal-derived cleanliness score in [floor, 1.0]; 1.0 = already-broadcast-clean.
+
+    Drives how hard the de-esser + multiband compressor push. Built ONLY from observable
+    signal facts so it is explainable and never a guess:
+      * noise floor: a clean studio voice has a low floor (<= ~-50 dBFS). A noisy capture
+        has a high floor -> lower cleanliness.
+      * speech/pause gap: real recordings have pauses; if the "silence" frames are still
+        speech-loud (no genuine gaps) the clip is dense/already-mastered -> treat as clean
+        so we don't re-process it.
+      * room resonance: the LTAS room notch only finds a peak on boxy captures; a clean
+        recording returns None -> full cleanliness.
+      * high-frequency dulling: the air-compensation gain measures dulling; a bright clean
+        voice needs little -> counts as clean.
+    Independent sub-scores are combined by the minimum (the worst defect dominates), then
+    floored at ``adaptive_intensity_floor`` so a clean take still keeps a gentle baseline.
+    """
+
+    if not settings.adaptive_intensity:
+        return 1.0
+    if len(x_mono) < sample_rate // 4:
+        return 1.0
+
+    # --- noise floor sub-score ---
+    if noise_floor_dbfs is not None:
+        # -50 dBFS floor -> 1.0 ; -30 dBFS (loud hiss) -> ~0.0 ; linear between.
+        nfs = max(0.0, min(1.0, (noise_floor_dbfs + 50.0) / 20.0))
+    else:
+        nfs = 1.0
+
+    # --- room resonance sub-score (reuse the LTAS notch finder) ---
+    notch_freq, _ = _ltas_room_notch(x_mono, sample_rate, settings)
+    rms_score = 1.0 if notch_freq is None else 0.6  # a found resonance => slightly less clean
+
+    # --- high-frequency dulling sub-score (reuse the air-comp gain) ---
+    air_db = _air_compensation_gain(x_mono, sample_rate, settings)
+    # min boost (1.5 dB) => clean/bright ; max boost (3.5 dB) => dulled => less clean.
+    air_score = max(0.0, min(1.0, 1.0 - (air_db - settings.air_comp_min_db) /
+                             max(1e-6, settings.air_comp_max_db - settings.air_comp_min_db)))
+
+    score = min(nfs, rms_score, air_score)
+    return float(max(settings.adaptive_intensity_floor, score))
+
+
 def master_voice(
     samples: np.ndarray,
     sample_rate: int,
     settings: MasteringSettings = MasteringSettings(),
+    noise_floor_dbfs: float | None = None,
 ) -> tuple[np.ndarray, MasteringReport]:
     """Apply the studio-mastering chain. Preserves channels and duration.
 
@@ -582,6 +648,16 @@ def master_voice(
     input_lufs = _lufs_pyloudnorm(matrix, sample_rate)
     input_tp = _true_peak(np.max(np.abs(matrix), axis=1), sample_rate)
 
+    # Adaptive intensity gate: derive a single cleanliness score from the (mono) signal so
+    # the de-esser + broadband compressor + saturation are scaled down on already-clean audio.
+    # We use channel 0's RMS as the proxy mono estimate (cheap, sufficient for gating).
+    _mono = matrix[:, 0].astype(np.float64)
+    cleanliness = _cleanliness_factor(_mono, sample_rate, settings, noise_floor_dbfs)
+    # Per-stage intensity multipliers (floored by adaptive_intensity_floor inside the helper).
+    deesser_scale = cleanliness
+    comp_scale = 0.6 + 0.4 * cleanliness      # compressor: keep most of it (glue still useful)
+    sat_scale = 0.5 + 0.5 * cleanliness       # saturation: gentle on clean audio
+
     out = np.empty_like(matrix)
     for c in range(matrix.shape[1]):
         x = matrix[:, c].astype(np.float32)
@@ -611,13 +687,17 @@ def master_voice(
         # 2. De-esser (split-band): compress only the sibilant band. Runs AFTER the air
         #    high-shelf (step 1c) so the +boost cannot re-accentuate sibilance. The threshold
         #    is adaptive: anchored to the post-shelf sibilant-band RMS so it tracks the boost.
+        #    Intensity is scaled by `cleanliness`: a clean founder voice (cleanliness~1) gets
+        #    the full preset; a noisy capture scores lower and the de-esser is dialed back so
+        #    it never thins already-good consonants.
         if settings.enable_deesser:
             bp = _rbj_bandpass(sample_rate, settings.deesser_center_hz, settings.deesser_q)
             side = _apply_sos(x, [bp])
             thr = _adaptive_deesser_threshold(side, sample_rate, settings.deesser_threshold_dbfs)
+            deesser_ratio = settings.deesser_ratio * cleanliness
             _, gain_db = _compressor(
                 side, sample_rate,
-                thr, settings.deesser_ratio,
+                thr, deesser_ratio,
                 5.0, 40.0, knee_db=2.0,
             )
             x = x * (10.0 ** (gain_db / 20.0)).astype(np.float32)
@@ -632,17 +712,21 @@ def master_voice(
             )
 
         # 3. Dynamic-threshold broadband compression (RMS-driven, Gemini step 5).
+        #    Scaled by `comp_scale` on clean audio so glue stays but we don't over-squeeze a
+        #    naturally-even founder voice (over-compression is a top cause of "robotic").
         if settings.enable_compressor:
             dyn_threshold = _dynamic_compressor_threshold(x, sample_rate, settings.comp_threshold_dbfs)
+            comp_ratio = settings.comp_ratio * comp_scale
             x = _compressor(
                 x, sample_rate,
-                dyn_threshold, settings.comp_ratio,
+                dyn_threshold, comp_ratio,
                 settings.comp_attack_ms, settings.comp_release_ms,
             )[0]
 
-        # 4. Tape saturation warmth (odd harmonics).
+        # 4. Tape saturation warmth (odd harmonics). Scaled by `sat_scale` so a clean bright
+        #    voice keeps its natural transient/edge instead of being rounded off unnecessarily.
         if settings.enable_saturation:
-            x = _tape_saturate(x, settings.saturation_drive).astype(np.float32)
+            x = _tape_saturate(x, settings.saturation_drive * sat_scale).astype(np.float32)
 
         out[:, c] = x
 
@@ -687,6 +771,7 @@ def master_voice(
         output_true_peak_dbfs=output_tp,
         gain_to_target_db=applied_gain_db,
         clipped_after=bool(output_tp > settings.true_peak_ceiling_dbfs + 0.1),
+        cleanliness=cleanliness,
     )
     return result, report
 

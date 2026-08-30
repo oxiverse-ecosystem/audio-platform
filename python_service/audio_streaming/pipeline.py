@@ -32,6 +32,9 @@ class PipelineReport:
     enhancer_detected_f0_hz: float | None
     # Mastering report (always populated).
     mastering: MasteringReport
+    # 1.0 = clean recording got full preset intensity; lower = scaled down on noisy audio.
+    # Directly observable from the mastering stage's adaptive-intensity gate.
+    cleanliness: float = 1.0
 
 
 def enhance_then_master(
@@ -78,7 +81,7 @@ def enhance_then_master(
     else:
         noise_detected = True
 
-    mastered, mas_report = master_voice(enhanced, sample_rate, mastering)
+    mastered, mas_report = master_voice(enhanced, sample_rate, mastering, noise_floor_dbfs=noise_floor)
 
     report = PipelineReport(
         noise_detected=noise_detected,
@@ -87,6 +90,7 @@ def enhance_then_master(
         enhancer_estimated_noise_floor_dbfs=enh_report.estimated_noise_floor_dbfs,
         enhancer_detected_f0_hz=enh_report.detected_f0_hz,
         mastering=mas_report,
+        cleanliness=mas_report.cleanliness,
     )
     return mastered, report
 
