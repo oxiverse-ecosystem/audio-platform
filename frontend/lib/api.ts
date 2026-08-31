@@ -38,6 +38,25 @@ export interface LoginResponse {
   is_creator: boolean;
 }
 
+export interface UploadResponse {
+  job_id: string;
+  asset_id: string;
+  status: string;
+  status_url: string;
+}
+
+export interface JobStatusResponse {
+  job_id: string;
+  asset_id: string;
+  title: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+  report: Record<string, unknown> | null;
+  error: string | null;
+  download: Record<string, string> | null;
+}
+
 class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -98,6 +117,34 @@ export const api = {
     }),
 
   me: () => request<ApiUser>("/v1/auth/me", {}, true),
+
+  upload: (file: File, title: string, outputFormat: string, onProgress?: (pct: number) => void) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("title", title);
+    formData.append("output_format", outputFormat);
+
+    return new Promise<UploadResponse>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `${API_BASE}/v1/uploads`);
+      const token = getToken();
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable && onProgress) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+      xhr.onload = () => {
+        const data = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+        if (xhr.status >= 200 && xhr.status < 300) resolve(data as UploadResponse);
+        else reject(new ApiError(xhr.status, data?.detail || xhr.statusText));
+      };
+      xhr.onerror = () => reject(new ApiError(0, "Upload failed"));
+      xhr.send(formData);
+    });
+  },
+
+  getUploadStatus: (jobId: string) =>
+    request<JobStatusResponse>(`/v1/uploads/${jobId}`, {}, true),
 
   setToken,
   getToken,
