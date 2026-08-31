@@ -6,6 +6,13 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    # python-dotenv optional in some environments; os.environ still works if vars are exported
+    pass
+
 
 def _secret(name: str, default: str, environment: str) -> bytes:
     value = os.getenv(name, default)

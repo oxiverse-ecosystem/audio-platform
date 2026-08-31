@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import time
@@ -31,6 +32,36 @@ router = APIRouter(prefix="/v1/auth", tags=["auth"])
 VERIFY_TTL_SECONDS = 24 * 3600
 AUTH_TOKEN_TTL_SECONDS = 7 * 24 * 3600
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+RESEND_API_KEY = os.getenv("RESEND_API_KEY") or ""
+RESEND_FROM = os.getenv("RESEND_FROM") or "onboarding@resend.dev"
+APP_PUBLIC_BASE_URL = (os.getenv("APP_PUBLIC_BASE_URL") or "http://localhost:3000").rstrip("/")
+
+
+def _send_verify_email(email: str, verify_url: str) -> bool:
+    """Send the verification email via Resend. Returns True if sent, False if not configured (dev fallback)."""
+    if not RESEND_API_KEY or RESEND_API_KEY == "REPLACE_WITH_YOUR_RESEND_KEY":
+        return False
+    try:
+        import resend
+
+        resend.api_key = RESEND_API_KEY
+        resend.Emails.send({
+            "from": RESEND_FROM,
+            "to": [email],
+            "subject": "Verify your Oxiverse Audio email",
+            "html": (
+                "<p>Welcome to Oxiverse Audio.</p>"
+                f"<p>Confirm your email to start listening and publishing:</p>"
+                f'<p><a href="{verify_url}" style="background:#4648d4;color:#fff;padding:10px 18px;'
+                'border-radius:8px;text-decoration:none;display:inline-block;">Verify email</a></p>'
+                f'<p>Or paste this link: {verify_url}</p>'
+                "<p>This link expires in 24 hours.</p>"
+            ),
+        })
+        return True
+    except Exception:
+        return False
 
 
 # --- password hashing (stdlib) ---
@@ -121,15 +152,17 @@ async def signup(request: Request, body: SignupRequest):
 
     token = secrets.token_hex(32)
     await repo.create_verification(token, user_id, now, now + VERIFY_TTL_SECONDS)
-    base = str(request.base_url).rstrip("/")
-    verify_url = f"{base}/v1/auth/verify-email?token={token}"
-    _write_dev_email(request.app.state.settings, email, verify_url)
+    verify_url = f"{APP_PUBLIC_BASE_URL}/v1/auth/verify-email?token={token}"
+    emailed = _send_verify_email(email, verify_url)
+    if not emailed:
+        _write_dev_email(request.app.state.settings, email, verify_url)
 
     return {
         "user_id": user_id,
         "email": email,
         "email_verified": False,
-        "dev_note": "no email sent; verify via the returned URL or runtime-data/dev-emails.log",
+        "email_sent": emailed,
+        "dev_note": None if emailed else "Resend not configured; verify via runtime-data/dev-emails.log or the returned URL",
         "verify_url": verify_url,
         "verify_token": token,
     }
@@ -173,12 +206,13 @@ async def login(request: Request, body: LoginRequest):
         now = int(time.time())
         token = secrets.token_hex(32)
         await repo.create_verification(token, user["user_id"], now, now + VERIFY_TTL_SECONDS)
-        base = str(request.base_url).rstrip("/")
-        verify_url = f"{base}/v1/auth/verify-email?token={token}"
-        _write_dev_email(request.app.state.settings, email, verify_url)
+        verify_url = f"{APP_PUBLIC_BASE_URL}/v1/auth/verify-email?token={token}"
+        emailed = _send_verify_email(email, verify_url)
+        if not emailed:
+            _write_dev_email(request.app.state.settings, email, verify_url)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="email not verified",
+            detail="email not verified" + ("" if emailed else "; verification link re-issued (see email or dev log)"),
             headers={"X-Verify-Token": token},
         )
 
