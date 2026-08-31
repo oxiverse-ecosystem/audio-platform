@@ -15,8 +15,8 @@ export function Landing() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors hidden md:block" href="/account">Login</Link>
-          <Link className="bg-primary text-on-primary font-body-md text-body-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity active:opacity-80" href="/account">Sign Up</Link>
+          <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors hidden md:block" href="/login">Login</Link>
+          <Link className="bg-primary text-on-primary font-body-md text-body-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity active:opacity-80" href="/signup">Sign Up</Link>
         </div>
       </header>
 

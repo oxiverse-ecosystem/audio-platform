@@ -56,6 +56,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
     )
 
+    # CORS: allow the Next.js frontend (any localhost dev port) to call the API.
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://localhost:\d+",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     @app.middleware("http")
     async def request_context(request: Request, call_next):
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Home,
   Users,
@@ -7,7 +10,10 @@ import {
   Mic,
   Settings,
   ShieldCheck,
+  LogIn,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "@/context/AuthContext";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -18,8 +24,16 @@ const NAV = [
 ];
 
 export function Sidebar() {
+  const { user, logout } = useAuth();
+  const router = useRouter();
+
+  const handleLogout = () => {
+    logout();
+    router.push("/login");
+  };
+
   return (
-    <nav className="hidden md:flex flex-col w-64 flex-shrink-0 bg-surface-container border-r border-outline-variant/30 p-margin-desktop overflow-y-auto hide-scrollbar">
+    <nav className="hidden md:flex w-sidebar flex-col bg-surface border-r border-outline-variant/40 p-5 fixed inset-y-0 left-0 z-40">
       <Link
         href="/"
         className="font-bold text-primary font-body-md text-body-md mb-8"
@@ -69,6 +83,33 @@ export function Sidebar() {
         >
           Upgrade Plan
         </Link>
+      </div>
+
+      {/* Auth state */}
+      <div className="mt-4 pt-4 border-t border-outline-variant/40">
+        {user ? (
+          <div className="flex flex-col gap-2">
+            <div className="px-3 py-2">
+              <div className="font-caption text-caption text-on-surface truncate">{user.display_name}</div>
+              <div className="font-label-sm text-label-sm text-on-surface-variant truncate">{user.email}</div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg font-caption text-caption text-on-surface-variant hover:bg-surface-container-high transition-colors"
+            >
+              <LogOut className="w-5 h-5" strokeWidth={1.5} />
+              Log out
+            </button>
+          </div>
+        ) : (
+          <Link
+            href="/login"
+            className="flex items-center gap-3 px-3 py-2.5 rounded-lg font-caption text-caption text-on-surface-variant hover:bg-surface-container-high transition-colors"
+          >
+            <LogIn className="w-5 h-5" strokeWidth={1.5} />
+            Log in
+          </Link>
+        )}
       </div>
     </nav>
   );

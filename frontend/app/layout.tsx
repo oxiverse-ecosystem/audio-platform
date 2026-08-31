@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { JetBrains_Mono } from "next/font/google";
+import { Providers } from "@/components/Providers";
 import "./globals.css";
 
 // Geist is not in next/font/google; use Inter as body and a geometric fallback.
@@ -38,7 +39,7 @@ export default function RootLayout({
         <style>{`:root{--font-display:'Geist',sans-serif;}`}</style>
       </head>
       <body className={`${inter.variable} ${labelMono.variable} antialiased`}>
-        {children}
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

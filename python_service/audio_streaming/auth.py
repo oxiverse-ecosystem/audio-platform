@@ -40,14 +40,17 @@ APP_PUBLIC_BASE_URL = (os.getenv("APP_PUBLIC_BASE_URL") or "http://localhost:300
 
 def _send_verify_email(email: str, verify_url: str) -> bool:
     """Send the verification email via Resend. Returns True if sent, False if not configured (dev fallback)."""
-    if not RESEND_API_KEY or RESEND_API_KEY == "REPLACE_WITH_YOUR_RESEND_KEY":
+    # Read env lazily so this works regardless of import order (config.load_dotenv may not have run yet).
+    api_key = os.getenv("RESEND_API_KEY") or ""
+    resend_from = os.getenv("RESEND_FROM") or "onboarding@resend.dev"
+    if not api_key or api_key == "REPLACE_WITH_YOUR_RESEND_KEY":
         return False
     try:
         import resend
 
-        resend.api_key = RESEND_API_KEY
+        resend.api_key = api_key
         resend.Emails.send({
-            "from": RESEND_FROM,
+            "from": resend_from,
             "to": [email],
             "subject": "Verify your Oxiverse Audio email",
             "html": (
