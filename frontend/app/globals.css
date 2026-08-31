@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Geist", sans-serif;
+  --font-body: "Inter", sans-serif;
+  --font-label: "JetBrains Mono", monospace;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #f7f9fb;
+  color: #191c1e;
+  font-family: var(--font-body);
+}
+
+/* Hide scrollbar utility used in Stitch layout */
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Waveform visualizer bars (Now Playing) */
+.waveform-bar {
+  width: 3px;
+  border-radius: 9999px;
+  background-color: #c7c4d7; /* outline-variant */
+  flex-shrink: 0;
+}
+.waveform-bar.active {
+  background-color: #6063ee; /* primary-container */
+}
+
+/* Mobile nav spacing helper */
+@media (min-width: 768px) {
+  .md\:pl-sidebar {
+    padding-left: 18rem;
+  }
+}

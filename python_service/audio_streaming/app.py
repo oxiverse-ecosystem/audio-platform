@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from .api import router as streaming_router
 from .enhance import router as enhance_router
 from .upload import router as upload_router
+from .stream_ab import ABStreamService
 from .cache import RequestRateLimiter
 from .config import Settings
 from .repository import Repository
@@ -40,6 +41,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.media_store = media_store
         app.state.url_signer = url_signer
         app.state.streaming_service = StreamingService(resolved_settings, repository)
+        app.state.ab_stream = ABStreamService(media_store, url_signer)
         app.state.request_limiter = RequestRateLimiter(resolved_settings.request_limit_per_minute)
         yield
         await app.state.streaming_service.close()
@@ -94,6 +96,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(streaming_router)
     app.include_router(enhance_router)
     app.include_router(upload_router)
+    from .stream import router as stream_ab_router
+    app.include_router(stream_ab_router)
     return app
 
 
