@@ -73,6 +73,23 @@ CREATE TABLE IF NOT EXISTS audit_events (
     created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS audit_events_created_at ON audit_events(created_at);
+CREATE TABLE IF NOT EXISTS users (
+    user_id TEXT PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    email_verified INTEGER NOT NULL DEFAULT 0,
+    is_creator INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS email_verifications (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS email_verifications_user ON email_verifications(user_id, used_at);
 """
 
 
@@ -188,7 +205,6 @@ class Repository:
 
     async def encryption_key_metadata(self, session_id: str) -> dict[str, Any] | None:
         """Return versioned operational metadata only; no raw or encrypted AES key is stored."""
-
         async with self._lock:
             row = self._db().execute(
                 """SELECT key_purpose,derivation_version,key_reference,created_at,expires_at,rotation_status
@@ -216,6 +232,51 @@ class Repository:
                 (event_type, session_id, asset_id, stable_hash(user_id) if user_id else None, outcome, latency_ms,
                  json.dumps(safe_details, sort_keys=True), int(time.time())),
             )
+            self._db().commit()
+
+    # --- auth (dev): users + email verification ---
+    async def create_user(
+        self, user_id: str, email: str, display_name: str, password_hash: str, is_creator: bool, now: int
+    ) -> None:
+        async with self._lock:
+            self._db().execute(
+                """INSERT INTO users(user_id,email,display_name,password_hash,email_verified,is_creator,created_at)
+                VALUES(?,?,?,?,0,?,?)""",
+                (user_id, email, display_name, password_hash, int(bool(is_creator)), now),
+            )
+            self._db().commit()
+
+    async def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
+        return dict(row) if row else None
+
+    async def get_user_by_id(self, user_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    async def set_email_verified(self, user_id: str, now: int) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE users SET email_verified=1 WHERE user_id=?", (user_id,))
+            self._db().commit()
+
+    async def create_verification(self, token: str, user_id: str, created_at: int, expires_at: int) -> None:
+        async with self._lock:
+            self._db().execute(
+                "INSERT INTO email_verifications(token,user_id,created_at,expires_at,used_at) VALUES(?,?,?,?,NULL)",
+                (token, user_id, created_at, expires_at),
+            )
+            self._db().commit()
+
+    async def get_verification(self, token: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute("SELECT * FROM email_verifications WHERE token=?", (token,)).fetchone()
+        return dict(row) if row else None
+
+    async def mark_verification_used(self, token: str, now: int) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE email_verifications SET used_at=? WHERE token=?", (now, token))
             self._db().commit()
 
     @staticmethod

@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from .api import router as streaming_router
 from .enhance import router as enhance_router
 from .upload import router as upload_router
+from .auth import router as auth_router
 from .stream_ab import ABStreamService
 from .cache import RequestRateLimiter
 from .config import Settings
@@ -98,6 +99,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(upload_router)
     from .stream import router as stream_ab_router
     app.include_router(stream_ab_router)
+    app.include_router(auth_router)
     return app
 
 
