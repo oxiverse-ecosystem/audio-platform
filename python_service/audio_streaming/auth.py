@@ -159,7 +159,7 @@ async def signup(request: Request, body: SignupRequest):
 
     token = secrets.token_hex(32)
     await repo.create_verification(token, user_id, now, now + VERIFY_TTL_SECONDS)
-    verify_url = f"{_public_base_url()}/v1/auth/verify-email?token={token}"
+    verify_url = f"{_public_base_url()}/verify-email?token={token}"
     emailed = _send_verify_email(email, verify_url)
     if not emailed:
         _write_dev_email(request.app.state.settings, email, verify_url)
@@ -213,7 +213,7 @@ async def login(request: Request, body: LoginRequest):
         now = int(time.time())
         token = secrets.token_hex(32)
         await repo.create_verification(token, user["user_id"], now, now + VERIFY_TTL_SECONDS)
-        verify_url = f"{_public_base_url()}/v1/auth/verify-email?token={token}"
+        verify_url = f"{_public_base_url()}/verify-email?token={token}"
         emailed = _send_verify_email(email, verify_url)
         if not emailed:
             _write_dev_email(request.app.state.settings, email, verify_url)
