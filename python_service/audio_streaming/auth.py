@@ -33,9 +33,13 @@ VERIFY_TTL_SECONDS = 24 * 3600
 AUTH_TOKEN_TTL_SECONDS = 7 * 24 * 3600
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-RESEND_API_KEY = os.getenv("RESEND_API_KEY") or ""
-RESEND_FROM = os.getenv("RESEND_FROM") or "onboarding@resend.dev"
-APP_PUBLIC_BASE_URL = (os.getenv("APP_PUBLIC_BASE_URL") or "http://localhost:3000").rstrip("/")
+
+
+def _public_base_url() -> str:
+    """Read APP_PUBLIC_BASE_URL lazily (import-order safe)."""
+    return (os.getenv("APP_PUBLIC_BASE_URL") or "http://localhost:3000").rstrip("/")
+
+
 
 
 def _send_verify_email(email: str, verify_url: str, subject: str = "Verify your Oxiverse Audio email") -> bool:
@@ -155,7 +159,7 @@ async def signup(request: Request, body: SignupRequest):
 
     token = secrets.token_hex(32)
     await repo.create_verification(token, user_id, now, now + VERIFY_TTL_SECONDS)
-    verify_url = f"{APP_PUBLIC_BASE_URL}/v1/auth/verify-email?token={token}"
+    verify_url = f"{_public_base_url()}/v1/auth/verify-email?token={token}"
     emailed = _send_verify_email(email, verify_url)
     if not emailed:
         _write_dev_email(request.app.state.settings, email, verify_url)
@@ -209,7 +213,7 @@ async def login(request: Request, body: LoginRequest):
         now = int(time.time())
         token = secrets.token_hex(32)
         await repo.create_verification(token, user["user_id"], now, now + VERIFY_TTL_SECONDS)
-        verify_url = f"{APP_PUBLIC_BASE_URL}/v1/auth/verify-email?token={token}"
+        verify_url = f"{_public_base_url()}/v1/auth/verify-email?token={token}"
         emailed = _send_verify_email(email, verify_url)
         if not emailed:
             _write_dev_email(request.app.state.settings, email, verify_url)
@@ -271,8 +275,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest):
     now = int(time.time())
     token = secrets.token_hex(32)
     await repo.create_password_reset(token, user["user_id"], now, now + PASSWORD_RESET_TTL)
-    base = str(request.base_url).rstrip("/")
-    reset_url = f"{base}/reset-password?token={token}"
+    reset_url = f"{_public_base_url()}/reset-password?token={token}"
 
     # Send via Resend (same pattern as verify email)
     emailed = _send_verify_email(email, reset_url, subject="Reset your Oxiverse Audio password")
