@@ -38,7 +38,7 @@ RESEND_FROM = os.getenv("RESEND_FROM") or "onboarding@resend.dev"
 APP_PUBLIC_BASE_URL = (os.getenv("APP_PUBLIC_BASE_URL") or "http://localhost:3000").rstrip("/")
 
 
-def _send_verify_email(email: str, verify_url: str) -> bool:
+def _send_verify_email(email: str, verify_url: str, subject: str = "Verify your Oxiverse Audio email") -> bool:
     """Send the verification email via Resend. Returns True if sent, False if not configured (dev fallback)."""
     # Read env lazily so this works regardless of import order (config.load_dotenv may not have run yet).
     api_key = os.getenv("RESEND_API_KEY") or ""
@@ -52,7 +52,7 @@ def _send_verify_email(email: str, verify_url: str) -> bool:
         resend.Emails.send({
             "from": resend_from,
             "to": [email],
-            "subject": "Verify your Oxiverse Audio email",
+            "subject": subject,
             "html": (
                 "<p>Welcome to Oxiverse Audio.</p>"
                 f"<p>Confirm your email to start listening and publishing:</p>"
@@ -243,3 +243,68 @@ async def me(request: Request, user_id: Annotated[str, Depends(require_auth)]):
         "is_creator": bool(user["is_creator"]),
         "created_at": user["created_at"],
     }
+
+
+# --- password reset ---
+PASSWORD_RESET_TTL = 1 * 3600  # 1 hour
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
+
+
+@router.post("/forgot-password")
+async def forgot_password(request: Request, body: ForgotPasswordRequest):
+    """Send a password reset email. Always returns 200 (don't leak whether email exists)."""
+    email = body.email.strip().lower()
+    repo = _repo(request)
+    user = await repo.get_user_by_email(email)
+    # Always return success to avoid leaking which emails are registered
+    if user is None:
+        return {"message": "If that email is registered, a reset link has been sent."}
+
+    now = int(time.time())
+    token = secrets.token_hex(32)
+    await repo.create_password_reset(token, user["user_id"], now, now + PASSWORD_RESET_TTL)
+    base = str(request.base_url).rstrip("/")
+    reset_url = f"{base}/reset-password?token={token}"
+
+    # Send via Resend (same pattern as verify email)
+    emailed = _send_verify_email(email, reset_url, subject="Reset your Oxiverse Audio password")
+    if not emailed:
+        # dev fallback
+        try:
+            log_path = request.app.state.settings.data_dir / "dev-emails.log"
+            request.app.state.settings.data_dir.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "a", encoding="utf-8") as fh:
+                fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} RESET {email} -> {reset_url}\n")
+        except OSError:
+            pass
+
+    return {"message": "If that email is registered, a reset link has been sent.", "email_sent": emailed}
+
+
+@router.post("/reset-password")
+async def reset_password(request: Request, body: ResetPasswordRequest):
+    """Validate reset token and set new password."""
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="password must be >= 8 chars")
+
+    repo = _repo(request)
+    row = await repo.get_password_reset(body.token)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="invalid reset token")
+    if row["used_at"] is not None:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="reset token already used")
+    if row["expires_at"] < int(time.time()):
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="reset token expired")
+
+    now = int(time.time())
+    await repo.update_password(row["user_id"], hash_password(body.new_password))
+    await repo.mark_password_reset_used(body.token, now)
+    return {"message": "Password reset successfully. You can now log in with your new password."}

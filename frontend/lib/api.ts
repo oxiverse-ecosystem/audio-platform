@@ -179,6 +179,18 @@ export const api = {
       body: JSON.stringify(data),
     }, true),
 
+  forgotPassword: (email: string) =>
+    request<{ message: string; email_sent: boolean }>("/v1/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  resetPassword: (token: string, newPassword: string) =>
+    request<{ message: string }>("/v1/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, new_password: newPassword }),
+    }),
+
   setToken,
   getToken,
   API_BASE,

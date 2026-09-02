@@ -90,6 +90,14 @@ CREATE TABLE IF NOT EXISTS email_verifications (
     used_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS email_verifications_user ON email_verifications(user_id, used_at);
+CREATE TABLE IF NOT EXISTS password_resets (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS password_resets_user ON password_resets(user_id, used_at);
 CREATE TABLE IF NOT EXISTS episodes (
     episode_id TEXT PRIMARY KEY,
     asset_id TEXT NOT NULL UNIQUE,
@@ -343,6 +351,30 @@ class Repository:
                 "SELECT DISTINCT category FROM episodes WHERE visibility=? ORDER BY category", (visibility,)
             ).fetchall()
         return [r["category"] for r in rows]
+
+    # --- password resets ---
+    async def create_password_reset(self, token: str, user_id: str, created_at: int, expires_at: int) -> None:
+        async with self._lock:
+            self._db().execute(
+                "INSERT INTO password_resets(token,user_id,created_at,expires_at,used_at) VALUES(?,?,?,?,NULL)",
+                (token, user_id, created_at, expires_at),
+            )
+            self._db().commit()
+
+    async def get_password_reset(self, token: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute("SELECT * FROM password_resets WHERE token=?", (token,)).fetchone()
+        return dict(row) if row else None
+
+    async def mark_password_reset_used(self, token: str, now: int) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE password_resets SET used_at=? WHERE token=?", (now, token))
+            self._db().commit()
+
+    async def update_password(self, user_id: str, password_hash: str) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE users SET password_hash=? WHERE user_id=?", (password_hash, user_id))
+            self._db().commit()
 
     @staticmethod
     def _asset_from_row(row: sqlite3.Row) -> AssetRecord:
