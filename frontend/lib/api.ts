@@ -57,6 +57,19 @@ export interface JobStatusResponse {
   download: Record<string, string> | null;
 }
 
+export interface EpisodeResponse {
+  episode_id: string;
+  asset_id: string;
+  creator_id: string;
+  title: string;
+  description: string | null;
+  category: string;
+  visibility: string;
+  duration_seconds: number;
+  play_count: number;
+  created_at: number;
+}
+
 class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -145,6 +158,26 @@ export const api = {
 
   getUploadStatus: (jobId: string) =>
     request<JobStatusResponse>(`/v1/uploads/${jobId}`, {}, true),
+
+  getEpisodes: (params: { category?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.category) qs.set("category", params.category);
+    if (params.search) qs.set("search", params.search);
+    qs.set("limit", String(params.limit ?? 50));
+    qs.set("offset", String(params.offset ?? 0));
+    return request<{ episodes: EpisodeResponse[]; limit: number; offset: number }>(
+      `/v1/episodes?${qs.toString()}`,
+    );
+  },
+
+  getEpisode: (episodeId: string) =>
+    request<EpisodeResponse>(`/v1/episodes/${episodeId}`),
+
+  createEpisode: (data: { asset_id: string; title: string; description?: string; category?: string; visibility?: string }) =>
+    request<EpisodeResponse>("/v1/episodes", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }, true),
 
   setToken,
   getToken,

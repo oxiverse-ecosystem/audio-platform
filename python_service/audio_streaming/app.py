@@ -110,6 +110,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from .stream import router as stream_ab_router
     app.include_router(stream_ab_router)
     app.include_router(auth_router)
+    from .episodes import router as episodes_router
+    app.include_router(episodes_router)
     return app
 
 

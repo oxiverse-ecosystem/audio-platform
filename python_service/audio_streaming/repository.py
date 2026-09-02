@@ -90,6 +90,21 @@ CREATE TABLE IF NOT EXISTS email_verifications (
     used_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS email_verifications_user ON email_verifications(user_id, used_at);
+CREATE TABLE IF NOT EXISTS episodes (
+    episode_id TEXT PRIMARY KEY,
+    asset_id TEXT NOT NULL UNIQUE,
+    creator_id TEXT NOT NULL REFERENCES users(user_id),
+    title TEXT NOT NULL,
+    description TEXT,
+    category TEXT NOT NULL DEFAULT 'Founder Stories',
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','pack','private')),
+    duration_seconds REAL NOT NULL DEFAULT 0,
+    play_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS episodes_created ON episodes(created_at DESC);
+CREATE INDEX IF NOT EXISTS episodes_category ON episodes(category, created_at DESC);
+CREATE INDEX IF NOT EXISTS episodes_creator ON episodes(creator_id, created_at DESC);
 """
 
 
@@ -278,6 +293,56 @@ class Repository:
         async with self._lock:
             self._db().execute("UPDATE email_verifications SET used_at=? WHERE token=?", (now, token))
             self._db().commit()
+
+    # --- episodes (discovery) ---
+    async def create_episode(
+        self, episode_id: str, asset_id: str, creator_id: str, title: str,
+        description: str | None, category: str, visibility: str, duration_seconds: float, now: int,
+    ) -> None:
+        async with self._lock:
+            self._db().execute(
+                """INSERT INTO episodes(episode_id,asset_id,creator_id,title,description,category,visibility,duration_seconds,play_count,created_at)
+                   VALUES(?,?,?,?,?,?,?,?,0,?)""",
+                (episode_id, asset_id, creator_id, title, description, category, visibility, duration_seconds, now),
+            )
+            self._db().commit()
+
+    async def get_episodes(self, *, category: str | None = None, creator_id: str | None = None,
+                           search: str | None = None, visibility: str = "public",
+                           limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM episodes WHERE visibility=?"
+        params: list = [visibility]
+        if category:
+            sql += " AND category=?"
+            params.append(category)
+        if creator_id:
+            sql += " AND creator_id=?"
+            params.append(creator_id)
+        if search:
+            sql += " AND (title LIKE ? OR description LIKE ?)"
+            params.extend((f"%{search}%", f"%{search}%"))
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend((limit, offset))
+        async with self._lock:
+            rows = self._db().execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
+    async def get_episode(self, episode_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute("SELECT * FROM episodes WHERE episode_id=?", (episode_id,)).fetchone()
+        return dict(row) if row else None
+
+    async def increment_play_count(self, episode_id: str) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE episodes SET play_count=play_count+1 WHERE episode_id=?", (episode_id,))
+            self._db().commit()
+
+    async def get_categories(self, visibility: str = "public") -> list[str]:
+        async with self._lock:
+            rows = self._db().execute(
+                "SELECT DISTINCT category FROM episodes WHERE visibility=? ORDER BY category", (visibility,)
+            ).fetchall()
+        return [r["category"] for r in rows]
 
     @staticmethod
     def _asset_from_row(row: sqlite3.Row) -> AssetRecord:
