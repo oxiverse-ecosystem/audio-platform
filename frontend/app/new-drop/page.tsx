@@ -37,6 +37,8 @@ export default function NewDropPage() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadUrls, setDownloadUrls] = useState<{ mp3: string | null; wav: string | null } | null>(null);
+  const [published, setPublished] = useState(false);
+  const [publishing, setPublishing] = useState(false);
 
   // Audio preview state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -84,6 +86,26 @@ export default function NewDropPage() {
     } catch (err: unknown) {
       setStage("failed");
       setError(err instanceof ApiError ? err.message : "Upload failed");
+    }
+  };
+
+  const publishToDiscovery = async () => {
+    if (!jobId) return;
+    setPublishing(true);
+    setError(null);
+    try {
+      await api.createEpisode({
+        asset_id: jobId,
+        title: title || file?.name || "Untitled",
+        description: description || undefined,
+        category: "Founder Stories",
+        visibility: visibility === "public" ? "public" : "pack",
+      });
+      setPublished(true);
+    } catch (err: unknown) {
+      setError(err instanceof ApiError ? err.message : "Failed to publish");
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -261,9 +283,26 @@ export default function NewDropPage() {
                   )}
 
                   {stage === "ready" && (
-                    <div className="mt-4 flex items-center gap-2 text-primary">
-                      <CheckCircle className="w-4 h-4" />
-                      <span className="font-label-sm text-label-sm">Studio enhanced and ready!</span>
+                    <div className="mt-4 space-y-3">
+                      <div className="flex items-center gap-2 text-primary">
+                        <CheckCircle className="w-4 h-4" />
+                        <span className="font-label-sm text-label-sm">Studio enhanced and ready!</span>
+                      </div>
+                      {!published ? (
+                        <button
+                          onClick={publishToDiscovery}
+                          disabled={publishing}
+                          className="w-full bg-primary text-on-primary font-caption text-caption py-2.5 rounded-lg hover:bg-primary-container transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                          {publishing && <Loader2 className="w-4 h-4 animate-spin" />}
+                          Publish to Discovery
+                        </button>
+                      ) : (
+                        <div className="flex items-center gap-2 text-primary">
+                          <CheckCircle className="w-4 h-4" />
+                          <span className="font-label-sm text-label-sm">Published to Discovery!</span>
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -309,8 +348,14 @@ export default function NewDropPage() {
                 <Step
                   step={4}
                   title="Ready"
-                  desc="Your audio is enhanced and published."
+                  desc="Your audio is enhanced."
                   state={stage === "ready" ? "done" : stage === "failed" ? "failed" : "pending"}
+                />
+                <Step
+                  step={5}
+                  title="Published"
+                  desc="Listened on Discovery."
+                  state={published ? "done" : "pending"}
                   last
                 />
               </div>
