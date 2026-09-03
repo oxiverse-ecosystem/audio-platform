@@ -48,7 +48,7 @@ export default function AccountPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-surface relative">
+      <main className="flex-1 overflow-y-auto bg-surface relative md:pl-sidebar">
         <div className="max-w-container-max mx-auto p-margin-mobile md:p-margin-desktop pb-32">
           <div className="mb-stack-lg">
             <h1 className="font-headline-lg text-headline-lg hidden md:block text-on-surface mb-2">Account Settings</h1>

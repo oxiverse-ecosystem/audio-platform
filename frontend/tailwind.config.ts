@@ -75,6 +75,7 @@ const config: Config = {
         "stack-lg": "32px",
         "container-max": "1280px",
         unit: "4px",
+        sidebar: "16rem",
       },
       fontFamily: {
         "display-lg": ["var(--font-display)", "Geist", "sans-serif"],

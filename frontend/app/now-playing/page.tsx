@@ -42,7 +42,7 @@ export default function NowPlayingPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 ml-0 md:ml-64 p-margin-mobile md:p-margin-desktop flex flex-col xl:flex-row gap-gutter">
+      <main className="flex-1 md:pl-sidebar p-margin-mobile md:p-margin-desktop flex flex-col xl:flex-row gap-gutter">
         {/* Player column */}
         <div className="flex-1 flex flex-col gap-stack-lg max-w-4xl">
           <header className="flex justify-between items-start">

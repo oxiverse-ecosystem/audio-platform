@@ -29,7 +29,7 @@ export default function CreatorDashboardPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto p-margin-mobile md:p-margin-desktop">
+      <main className="flex-1 overflow-y-auto p-margin-mobile md:p-margin-desktop md:pl-sidebar">
         <div className="max-w-container-max mx-auto space-y-stack-lg">
           <header className="flex justify-between items-end pb-stack-md border-b border-outline-variant/50">
             <div>

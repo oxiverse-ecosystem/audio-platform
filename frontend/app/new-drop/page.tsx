@@ -11,6 +11,7 @@ import {
   Globe,
   Lock,
   Play,
+  Pause,
   Loader2,
   XCircle,
   FileAudio,
@@ -35,6 +36,14 @@ export default function NewDropPage() {
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [downloadUrls, setDownloadUrls] = useState<{ mp3: string | null; wav: string | null } | null>(null);
+
+  // Audio preview state
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Redirect to login if not authenticated
   useEffect(() => {
@@ -86,6 +95,7 @@ export default function NewDropPage() {
         const status = await api.getUploadStatus(jobId);
         if (status.status === "ready") {
           setStage("ready");
+          setDownloadUrls(status.download ? { mp3: status.download.mp3 || null, wav: status.download.wav || null } : null);
           clearInterval(interval);
         } else if (status.status === "failed") {
           setStage("failed");
@@ -100,6 +110,52 @@ export default function NewDropPage() {
     }, 2000);
     return () => clearInterval(interval);
   }, [stage, jobId]);
+
+  // Create local audio preview from uploaded file
+  useEffect(() => {
+    if (file) {
+      const url = URL.createObjectURL(file);
+      setAudioUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      setAudioUrl(null);
+    }
+  }, [file]);
+
+  // Audio time tracking
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    const onTime = () => setCurrentTime(audio.currentTime);
+    const onLoaded = () => setDuration(audio.duration);
+    const onEnded = () => setIsPlaying(false);
+    audio.addEventListener("timeupdate", onTime);
+    audio.addEventListener("loadedmetadata", onLoaded);
+    audio.addEventListener("ended", onEnded);
+    return () => {
+      audio.removeEventListener("timeupdate", onTime);
+      audio.removeEventListener("loadedmetadata", onLoaded);
+      audio.removeEventListener("ended", onEnded);
+    };
+  }, [audioUrl]);
+
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
+    if (isPlaying) {
+      audio.pause();
+      setIsPlaying(false);
+    } else {
+      audio.play();
+      setIsPlaying(true);
+    }
+  };
+
+  const fmt = (s: number) => {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  };
 
   if (loading) {
     return (
@@ -123,7 +179,7 @@ export default function NewDropPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-grow overflow-y-auto bg-surface-bright relative">
+      <main className="flex-grow overflow-y-auto bg-surface-bright relative md:pl-sidebar">
         <div className="max-w-container-max mx-auto px-margin-desktop py-stack-lg">
           <header className="mb-stack-lg flex justify-between items-end">
             <div>
@@ -310,26 +366,43 @@ export default function NewDropPage() {
                 </div>
               </div>
 
-              {/* Audio preview (placeholder) */}
+              {/* Audio preview */}
               <div className="bg-surface-container-low border border-outline-variant rounded-xl p-6 relative overflow-hidden">
                 <div className="absolute inset-0 opacity-20 pointer-events-none" style={{ background: "linear-gradient(135deg, rgba(70,72,212,0.1) 0%, rgba(218,226,253,0.1) 100%)", backdropFilter: "blur(10px)" }} />
                 <h4 className="font-caption text-caption text-on-surface font-bold mb-4 relative z-10">Enhancement Preview</h4>
-                <div className="flex items-center gap-4 relative z-10 bg-surface-container-lowest p-4 rounded-lg border border-outline-variant">
-                  <button className="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center hover:bg-primary-container transition-colors flex-shrink-0">
-                    <Play className="w-5 h-5" strokeWidth={1.5} />
-                  </button>
-                  <div className="flex-grow h-10 relative">
-                    <div className="absolute inset-0 rounded bg-surface-variant" />
-                    <div className="absolute inset-y-0 left-0 w-[60%] rounded bg-primary-fixed-dim" />
+                {audioUrl ? (
+                  <div className="relative z-10">
+                    <audio ref={audioRef} src={audioUrl} preload="metadata" />
+                    <div className="flex items-center gap-4 bg-surface-container-lowest p-4 rounded-lg border border-outline-variant">
+                      <button
+                        onClick={togglePlay}
+                        className="w-10 h-10 rounded-full bg-primary text-on-primary flex items-center justify-center hover:bg-primary-container transition-colors flex-shrink-0"
+                      >
+                        {isPlaying ? <Pause className="w-5 h-5" strokeWidth={1.5} /> : <Play className="w-5 h-5" strokeWidth={1.5} />}
+                      </button>
+                      <div className="flex-grow h-10 relative">
+                        <div className="absolute inset-0 rounded bg-surface-variant" />
+                        <div
+                          className="absolute inset-y-0 left-0 rounded bg-primary-fixed-dim transition-all"
+                          style={{ width: duration ? `${(currentTime / duration) * 100}%` : "0%" }}
+                        />
+                      </div>
+                      <span className="font-label-sm text-label-sm text-on-surface-variant flex-shrink-0">
+                        {fmt(currentTime)} / {fmt(duration)}
+                      </span>
+                    </div>
+                    <div className="flex justify-center mt-4">
+                      <div className="inline-flex bg-surface-container-lowest rounded-lg border border-outline-variant p-1">
+                        <button className="px-4 py-1.5 rounded-md font-caption text-caption text-on-surface-variant hover:bg-surface-variant transition-colors">Original</button>
+                        <button className="px-4 py-1.5 rounded-md font-caption text-caption bg-surface-variant text-on-surface font-bold shadow-sm">Studio Enhanced</button>
+                      </div>
+                    </div>
                   </div>
-                  <span className="font-label-sm text-label-sm text-on-surface-variant flex-shrink-0">0:14 / 2:35</span>
-                </div>
-                <div className="flex justify-center mt-4 relative z-10">
-                  <div className="inline-flex bg-surface-container-lowest rounded-lg border border-outline-variant p-1">
-                    <button className="px-4 py-1.5 rounded-md font-caption text-caption text-on-surface-variant hover:bg-surface-variant transition-colors">Original</button>
-                    <button className="px-4 py-1.5 rounded-md font-caption text-caption bg-surface-variant text-on-surface font-bold shadow-sm">Studio Enhanced</button>
+                ) : (
+                  <div className="text-center py-8 relative z-10">
+                    <p className="font-body-md text-body-md text-on-surface-variant">Upload an audio file to preview</p>
                   </div>
-                </div>
+                )}
               </div>
             </div>
           </div>

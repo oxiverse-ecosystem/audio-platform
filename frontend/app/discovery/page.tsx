@@ -57,7 +57,7 @@ export default function DiscoveryPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 flex flex-col md:flex-row min-w-0 overflow-hidden">
+      <main className="flex-1 flex flex-col md:flex-row min-w-0 overflow-hidden md:pl-sidebar">
         {/* Center Canvas */}
         <div className="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-stack-lg hide-scrollbar">
           <div className="max-w-container-max mx-auto mb-stack-lg">
