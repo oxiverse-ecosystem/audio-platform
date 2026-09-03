@@ -133,14 +133,6 @@ function PlanTab() {
           Subscriptions providing unlimited access to specific founder archives.
         </p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-surface-container-lowest p-4 rounded-xl flex items-center gap-4 hover:-translate-y-1 transition-transform cursor-pointer border border-outline-variant/50">
-            <img className="w-12 h-12 rounded-full object-cover border border-outline-variant" src="https://lh3.googleusercontent.com/aida-public/AB6AXuA_PSFkBPTfAevy3SJ1993XgVNBHOCZFO6gBePQ5IHuiuXuVRHKe1V4CDzIo4zkQU-P5V8_J24X_jXLVypvzNHrjZafebjS-QhNlJP6rGW_nLS4Pl0MwkIreikCUneLwI9pPCONmZ9N1a_Srj2PIWaX_YdFc9WaHl1bo-g66zhbtatug3e_PTwhPm_xID4elVJLJqa9DBKIDr-6sNnqGvZD-Sen9jrwabdtSSR2RYojpg1sL3T_EFJv" alt="Sarah Jenkins" />
-            <div>
-              <div className="font-caption text-caption text-on-surface font-semibold">Sarah Jenkins Archival</div>
-              <div className="font-label-sm text-label-sm text-on-surface-variant">$5/mo • Renews Oct 12</div>
-            </div>
-            <MoreVertical className="ml-auto text-on-surface-variant w-5 h-5" strokeWidth={1.5} />
-          </div>
           <div className="border border-dashed border-outline-variant rounded-xl p-4 flex items-center justify-center gap-2 text-on-surface-variant hover:text-primary hover:border-primary transition-colors cursor-pointer bg-surface-container-lowest/50">
             <Plus className="w-5 h-5" strokeWidth={1.5} />
             <span className="font-label-sm text-label-sm">Browse Creator Packs</span>
@@ -155,20 +147,20 @@ function UsageTab() {
   return (
     <div className="bg-surface-container-lowest rounded-xl p-8 max-w-3xl border border-outline-variant/50">
       <h3 className="font-headline-md text-headline-md mb-2 text-on-surface">Current Cycle Usage</h3>
-      <p className="font-body-md text-body-md text-on-surface-variant mb-8">Cycle ends on October 31, 2024</p>
+      <p className="font-body-md text-body-md text-on-surface-variant mb-8">Free tier: 10 hours monthly listening</p>
       <div className="mb-4 flex justify-between items-end">
         <div className="font-display-lg text-display-lg text-primary tracking-tight">
-          8.4 <span className="font-body-lg text-body-lg text-on-surface-variant tracking-normal">hrs</span>
+          0 <span className="font-body-lg text-body-lg text-on-surface-variant tracking-normal">hrs</span>
         </div>
         <div className="font-label-sm text-label-sm text-on-surface-variant text-right">10 hrs limit</div>
       </div>
       <div className="w-full bg-surface-variant rounded-full h-3 mb-2 overflow-hidden relative">
-        <div className="bg-primary h-3 rounded-full absolute top-0 left-0" style={{ width: "84%" }} />
+        <div className="bg-primary h-3 rounded-full absolute top-0 left-0" style={{ width: "0%" }} />
         <div className="absolute top-0 w-0.5 h-full bg-on-surface/20" style={{ left: "50%" }} />
       </div>
       <div className="flex justify-between font-label-sm text-label-sm text-on-surface-variant">
         <span>0%</span>
-        <span>84% utilized</span>
+        <span>0% utilized</span>
         <span>100%</span>
       </div>
       <div className="mt-8 pt-8 border-t border-surface-variant">

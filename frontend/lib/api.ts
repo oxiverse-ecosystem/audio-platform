@@ -179,6 +179,14 @@ export const api = {
       body: JSON.stringify(data),
     }, true),
 
+  getMyAnalytics: () =>
+    request<{ total_episodes: number; total_plays: number; total_duration_seconds: number; total_earnings: number; pack_subscribers: number }>(
+      "/v1/analytics/me", {}, true,
+    ),
+
+  getMyEpisodes: () =>
+    request<{ episodes: EpisodeResponse[] }>("/v1/episodes/me", {}, true),
+
   forgotPassword: (email: string) =>
     request<{ message: string; email_sent: boolean }>("/v1/auth/forgot-password", {
       method: "POST",

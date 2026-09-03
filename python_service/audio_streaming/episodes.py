@@ -96,3 +96,20 @@ async def get_episode(request: Request, episode_id: str):
     if episode is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="episode not found")
     return EpisodeResponse(**episode)
+
+
+# --- analytics (creator dashboard) ---
+@router.get("/analytics/me")
+async def get_my_analytics(request: Request, principal: Annotated[Principal, Depends(require_principal)]):
+    """Get analytics for the authenticated creator."""
+    repo = _repo(request)
+    stats = await repo.get_creator_stats(principal.subject)
+    return stats
+
+
+@router.get("/episodes/me")
+async def get_my_episodes(request: Request, principal: Annotated[Principal, Depends(require_principal)]):
+    """Get episodes by the authenticated creator."""
+    repo = _repo(request)
+    episodes = await repo.get_creator_episodes(principal.subject)
+    return {"episodes": episodes}

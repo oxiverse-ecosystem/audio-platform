@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { Player } from "@/components/Player";
+import { api, EpisodeResponse } from "@/lib/api";
 import {
   Sparkles,
   Gauge,
@@ -11,19 +13,36 @@ import {
   FastForward,
   Volume2,
   ShieldCheck,
+  Loader2,
+  Mic2,
 } from "lucide-react";
 
-const CHAPTERS = [
-  { time: "00:00", label: "Introduction", active: false },
-  { time: "02:45", label: "The Monolith Breaks", active: false },
-  { time: "14:22", label: "The Pivot: Event-Driven Architecture", active: true },
-  { time: "28:10", label: "Security Implications", active: false },
-  { time: "41:00", label: "Q&A and Closing Thoughts", active: false },
-];
+function formatDuration(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
-export default function NowPlayingPage() {
+function NowPlayingContent() {
+  const params = useSearchParams();
+  const [episode, setEpisode] = useState<EpisodeResponse | null>(null);
+  const [loading, setLoading] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const episodeId = params.get("id");
+
+  useEffect(() => {
+    if (!episodeId) {
+      setLoading(false);
+      return;
+    }
+    api.getEpisode(episodeId)
+      .then(setEpisode)
+      .catch(() => setEpisode(null))
+      .finally(() => setLoading(false));
+  }, [episodeId]);
+
+  // Generate waveform bars
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -37,7 +56,30 @@ export default function NowPlayingPage() {
       if (i < numBars * 0.3) bar.classList.add("active");
       container.appendChild(bar);
     }
-  }, []);
+  }, [episode]);
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen bg-surface items-center justify-center">
+        <Loader2 className="w-8 h-8 text-primary animate-spin" />
+      </div>
+    );
+  }
+
+  if (!episode) {
+    return (
+      <div className="flex min-h-screen bg-surface">
+        <Sidebar />
+        <main className="flex-1 md:pl-sidebar p-margin-mobile md:p-margin-desktop flex items-center justify-center">
+          <div className="text-center">
+            <Mic2 className="w-12 h-12 text-on-surface-variant mx-auto mb-4" strokeWidth={1.5} />
+            <h2 className="font-headline-md text-headline-md text-on-surface mb-2">Episode not found</h2>
+            <p className="font-body-md text-body-md text-on-surface-variant">This episode doesn&apos;t exist or has been removed.</p>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-surface">
@@ -48,10 +90,10 @@ export default function NowPlayingPage() {
           <header className="flex justify-between items-start">
             <div>
               <h2 className="font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface">
-                The Pivot: Architecting for Scale
+                {episode.title}
               </h2>
               <p className="font-body-lg text-body-lg text-on-surface-variant mt-2">
-                By Sarah Jenkins, CTO at NexusData
+                By {episode.creator_id.slice(0, 12)}
               </p>
               <div className="mt-4 inline-flex items-center gap-2 bg-surface-container px-3 py-1.5 rounded-full border border-outline-variant">
                 <Sparkles className="text-primary w-4 h-4" strokeWidth={1.5} />
@@ -68,13 +110,8 @@ export default function NowPlayingPage() {
           </header>
 
           <section className="bg-surface-container-lowest rounded-xl border border-outline-variant p-stack-lg shadow-sm">
-            <div className="w-full h-48 sm:h-64 rounded-lg bg-surface-variant mb-stack-lg overflow-hidden relative">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                className="w-full h-full object-cover"
-                src="https://lh3.googleusercontent.com/aida-public/AB6AXuAev32MudUN8YX54rGAR6tPqvZoy923VU0DWAM0isuAgcHQfEk3c5Dk6-DMB562Ew3MOIxEHHNSENvLPVRKl3F4ax_PFOtEM1Pq0ujRnX-1NXNbCwG30PqPN5TLjMgr1tr7U-blz0JpBJ9Nda7R1M_4MIjah9AlUomR70IRFzny-mfAjUZOEINP4aSuFrQatmCyZiS6nvji51cOl4sXDbdJ7dSdoFvCNi2FMEJcZFeuiO8LJzIqXj2W"
-                alt="Abstract sound waves"
-              />
+            <div className="w-full h-48 sm:h-64 rounded-lg bg-surface-variant mb-stack-lg overflow-hidden relative flex items-center justify-center">
+              <Mic2 className="w-16 h-16 text-on-surface-variant" strokeWidth={1} />
               <div className="absolute inset-0 bg-gradient-to-t from-surface/80 to-transparent" />
             </div>
 
@@ -82,8 +119,8 @@ export default function NowPlayingPage() {
             <div ref={containerRef} className="w-full h-32 flex items-center justify-between mb-stack-md" />
 
             <div className="flex justify-between font-label-sm text-label-sm text-on-surface-variant mb-stack-lg">
-              <span>14:22</span>
-              <span>45:00</span>
+              <span>0:00</span>
+              <span>{formatDuration(episode.duration_seconds)}</span>
             </div>
 
             <div className="flex items-center justify-center gap-6 sm:gap-12">
@@ -112,39 +149,42 @@ export default function NowPlayingPage() {
           <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-6 shadow-sm">
             <h3 className="font-headline-md text-headline-md text-on-surface mb-4">Episode Notes</h3>
             <p className="font-body-md text-body-md text-on-surface-variant mb-4">
-              In this deep dive, Sarah discusses the inflection point where traditional
-              monoliths break down and the architectural decisions required to transition
-              to event-driven microservices securely.
+              {episode.description || "No description provided."}
             </p>
             <div className="flex flex-wrap gap-2">
-              {["Architecture", "Scale", "SaaS"].map((t) => (
-                <span key={t} className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
-                  {t}
-                </span>
-              ))}
+              <span className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
+                {episode.category}
+              </span>
+              <span className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
+                {formatDuration(episode.duration_seconds)}
+              </span>
+              <span className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
+                {episode.play_count} plays
+              </span>
             </div>
           </div>
 
           <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-6 shadow-sm flex-1">
-            <h3 className="font-headline-md text-headline-md text-on-surface mb-4">Chapters</h3>
+            <h3 className="font-headline-md text-headline-md text-on-surface mb-4">Details</h3>
             <ul className="space-y-4">
-              {CHAPTERS.map((c) => (
-                <li key={c.label} className="flex gap-4 cursor-pointer group">
-                  <span className={`font-label-sm text-label-sm mt-1 ${c.active ? "text-primary" : "text-on-surface-variant group-hover:text-primary transition-colors"}`}>
-                    {c.time}
-                  </span>
-                  <div>
-                    <p className={`font-body-md text-body-md group-hover:text-primary transition-colors ${c.active ? "text-primary font-medium" : "text-on-surface"}`}>
-                      {c.label}
-                    </p>
-                    {c.active && (
-                      <div className="w-full h-1 bg-surface-variant mt-2 rounded-full overflow-hidden">
-                        <div className="w-1/2 h-full bg-primary" />
-                      </div>
-                    )}
-                  </div>
-                </li>
-              ))}
+              <li className="flex gap-4">
+                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Episode ID</span>
+                <div>
+                  <p className="font-body-md text-body-md text-on-surface">{episode.episode_id}</p>
+                </div>
+              </li>
+              <li className="flex gap-4">
+                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Category</span>
+                <div>
+                  <p className="font-body-md text-body-md text-on-surface">{episode.category}</p>
+                </div>
+              </li>
+              <li className="flex gap-4">
+                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Visibility</span>
+                <div>
+                  <p className="font-body-md text-body-md text-on-surface capitalize">{episode.visibility}</p>
+                </div>
+              </li>
             </ul>
           </div>
           <p className="font-caption text-caption text-on-surface-variant/70 text-center flex items-center justify-center gap-2">
@@ -155,5 +195,13 @@ export default function NowPlayingPage() {
       </main>
       <Player />
     </div>
+  );
+}
+
+export default function NowPlayingPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen bg-surface items-center justify-center"><Loader2 className="w-8 h-8 text-primary animate-spin" /></div>}>
+      <NowPlayingContent />
+    </Suspense>
   );
 }

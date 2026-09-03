@@ -352,6 +352,33 @@ class Repository:
             ).fetchall()
         return [r["category"] for r in rows]
 
+    # --- analytics (creator dashboard) ---
+    async def get_creator_stats(self, creator_id: str) -> dict[str, Any]:
+        async with self._lock:
+            db = self._db()
+            episodes = db.execute("SELECT episode_id, play_count FROM episodes WHERE creator_id=?", (creator_id,)).fetchall()
+            total_episodes = len(episodes)
+            total_plays = sum(r["play_count"] for r in episodes)
+            total_seconds = db.execute(
+                "SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM episodes WHERE creator_id=?", (creator_id,)
+            ).fetchone()["s"]
+            # Mock earnings/subscribers for now (no payment system yet)
+            return {
+                "total_episodes": total_episodes,
+                "total_plays": total_plays,
+                "total_duration_seconds": total_seconds,
+                "total_earnings": 0.0,
+                "pack_subscribers": 0,
+            }
+
+    async def get_creator_episodes(self, creator_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        async with self._lock:
+            rows = self._db().execute(
+                "SELECT * FROM episodes WHERE creator_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (creator_id, limit, offset),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     # --- password resets ---
     async def create_password_reset(self, token: str, user_id: str, created_at: int, expires_at: int) -> None:
         async with self._lock:
