@@ -122,6 +122,22 @@ class JobsRepository:
         row = await self._fetch_one("SELECT * FROM jobs WHERE job_id=?", (job_id,))
         return self._record_from_row(row) if row else None
 
+    async def get_job_by_asset(self, asset_id: str) -> JobRecord | None:
+        row = await self._fetch_one(
+            "SELECT * FROM jobs WHERE asset_id=? ORDER BY created_at DESC LIMIT 1", (asset_id,),
+        )
+        return self._record_from_row(row) if row else None
+
+    async def get_ready_jobs(self) -> list[JobRecord]:
+        async with self._lock:
+            conn = sqlite3.connect(self._path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute("SELECT * FROM jobs WHERE status='ready'").fetchall()
+                return [self._record_from_row(r) for r in rows]
+            finally:
+                conn.close()
+
     async def record_usage(self, user_id: str, asset_id: str, seconds: float) -> None:
         await self._execute(
             "INSERT INTO usage_ledger(user_id,asset_id,seconds,created_at) VALUES(?,?,?,?)",

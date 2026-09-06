@@ -35,6 +35,7 @@ export default function NewDropPage() {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [assetId, setAssetId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [downloadUrls, setDownloadUrls] = useState<{ mp3: string | null; wav: string | null } | null>(null);
   const [published, setPublished] = useState(false);
@@ -71,6 +72,7 @@ export default function NewDropPage() {
     setStage("idle");
     setProgress(0);
     setJobId(null);
+    setAssetId(null);
     setError(null);
   };
 
@@ -82,6 +84,7 @@ export default function NewDropPage() {
     try {
       const res = await api.upload(file, title || file.name, "mp3", setProgress);
       setJobId(res.job_id);
+      setAssetId(res.asset_id);
       setStage("processing");
     } catch (err: unknown) {
       setStage("failed");
@@ -90,12 +93,12 @@ export default function NewDropPage() {
   };
 
   const publishToDiscovery = async () => {
-    if (!jobId) return;
+    if (!jobId || !assetId) return;
     setPublishing(true);
     setError(null);
     try {
       await api.createEpisode({
-        asset_id: jobId,
+        asset_id: assetId,
         title: title || file?.name || "Untitled",
         description: description || undefined,
         category: "Founder Stories",

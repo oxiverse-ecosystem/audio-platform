@@ -36,7 +36,6 @@ export default function RootLayout({
           href="https://fonts.googleapis.com/css2?family=Geist:wght@400..700&display=swap"
           rel="stylesheet"
         />
-        <style>{`:root{--font-display:'Geist',sans-serif;}`}</style>
       </head>
       <body className={`${inter.variable} ${labelMono.variable} antialiased`}>
         <Providers>{children}</Providers>

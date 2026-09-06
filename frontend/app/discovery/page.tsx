@@ -28,12 +28,19 @@ function timeAgo(ts: number): string {
   return `${Math.floor(diff / 86400)}d ago`;
 }
 
+function formatHours(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 export default function DiscoveryPage() {
   const router = useRouter();
   const [episodes, setEpisodes] = useState<EpisodeResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
+  const [analytics, setAnalytics] = useState<{ total_duration_seconds: number; total_plays: number } | null>(null);
 
   const fetchEpisodes = useCallback(async () => {
     setLoading(true);
@@ -53,6 +60,12 @@ export default function DiscoveryPage() {
   useEffect(() => {
     fetchEpisodes();
   }, [fetchEpisodes]);
+
+  useEffect(() => {
+    api.getMyAnalytics()
+      .then(setAnalytics)
+      .catch(() => setAnalytics(null));
+  }, []);
 
   return (
     <div className="flex min-h-screen bg-surface">
@@ -133,9 +146,11 @@ export default function DiscoveryPage() {
             </div>
             <p className="font-label-sm text-label-sm text-on-surface-variant mb-2">Usage this month</p>
             <div className="w-full bg-surface-container-high rounded-full h-1.5 mb-3">
-              <div className="bg-primary h-1.5 rounded-full" style={{ width: "65%" }} />
+              <div className="bg-primary h-1.5 rounded-full" style={{ width: analytics ? `${Math.min(100, (analytics.total_duration_seconds / 21600) * 100)}%` : "65%"} } />
             </div>
-            <p className="font-caption text-caption text-on-surface font-semibold mb-5">18h 32m left</p>
+            <p className="font-caption text-caption text-on-surface font-semibold mb-5">
+              {analytics ? `${formatHours(21600 - analytics.total_duration_seconds)} left` : "18h 32m left"}
+            </p>
             <button className="w-full bg-surface-container-lowest border border-outline-variant hover:border-primary hover:text-primary text-on-surface font-caption text-caption py-2 rounded-lg transition-colors">
               Upgrade Plan
             </button>

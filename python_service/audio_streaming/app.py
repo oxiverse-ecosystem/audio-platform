@@ -43,6 +43,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.url_signer = url_signer
         app.state.streaming_service = StreamingService(resolved_settings, repository)
         app.state.ab_stream = ABStreamService(media_store, url_signer)
+        # Re-ingest previously-ready uploads so published episodes stay playable across
+        # restarts (the A/B variant state lives in memory; the mastered files persist).
+        for job in await jobs_repository.get_ready_jobs():
+            if not job.asset_id or not job.mastered_key_wav:
+                continue
+            try:
+                mastered = media_store.get(job.mastered_key_wav)
+                await app.state.ab_stream.ingest_asset(job.asset_id, job.owner_user_id, mastered, 48000)
+            except Exception:
+                pass
         app.state.request_limiter = RequestRateLimiter(resolved_settings.request_limit_per_minute)
         yield
         await app.state.streaming_service.close()

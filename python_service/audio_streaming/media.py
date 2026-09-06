@@ -111,12 +111,14 @@ def load_segment(asset: AssetRecord, sequence: int) -> np.ndarray:
     return np.asarray(source[start : start + asset.segment_samples], dtype=np.float32).copy()
 
 
-def encode_aac_transport_stream(samples: np.ndarray, settings: Settings) -> bytes:
+def encode_aac_transport_stream(samples: np.ndarray, settings: Settings | None = None,
+                                sample_rate: int | None = None) -> bytes:
     """Encode one bounded personalized PCM segment as HLS-compatible AAC in MPEG-TS."""
 
+    sr = sample_rate or (settings.sample_rate if settings else 16000)
     command = [
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-f", "f32le", "-ar", str(settings.sample_rate), "-ac", "1", "-i", "pipe:0",
+        "-f", "f32le", "-ar", str(sr), "-ac", "1", "-i", "pipe:0",
         "-c:a", "aac", "-b:a", "96k", "-f", "mpegts", "pipe:1",
     ]
     try:
@@ -126,7 +128,7 @@ def encode_aac_transport_stream(samples: np.ndarray, settings: Settings) -> byte
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=True,
-            timeout=20,
+            timeout=30,
         )
     except FileNotFoundError as exc:
         raise RuntimeError("ffmpeg is required for AAC HLS segment encoding") from exc

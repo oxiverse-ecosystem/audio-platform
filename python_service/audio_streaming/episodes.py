@@ -49,18 +49,45 @@ async def create_episode(
     body: CreateEpisodeRequest,
     principal: Annotated[Principal, Depends(require_principal)],
 ):
-    """Register an episode from a ready upload so it appears in discovery."""
+    """Publish a ready upload so it appears in discovery and is immediately playable.
+
+    The referenced upload must have finished studio processing (job status ``ready``).
+    Publishing bakes the A/B watermarked HLS segments + AES key so playback works, and
+    stores the real duration from the processing report.
+    """
     repo = _repo(request)
     if not body.title.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="title required")
     if body.visibility not in ("public", "pack", "private"):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid visibility")
 
+    job = await request.app.state.jobs_repository.get_job_by_asset(body.asset_id)
+    if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="asset not found; upload must be completed first")
+    if job.owner_user_id != principal.subject:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your upload")
+    if job.status != "ready":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="upload still processing")
+    if not job.mastered_key_wav:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="upload has no mastered output; re-upload")
+
+    # Bake A/B watermarked segments + AES so the episode is playable immediately.
+    try:
+        mastered_pcm = request.app.state.media_store.get(job.mastered_key_wav)
+    except FileNotFoundError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="mastered asset missing; re-upload")
+    rec = await request.app.state.ab_stream.ingest_asset(job.asset_id, principal.subject, mastered_pcm, 48000)
+
+    if job.report and isinstance(job.report.get("duration_seconds"), (int, float)):
+        duration = float(job.report["duration_seconds"])
+    else:
+        duration = round(sum(rec.segment_durations), 2)
+
     episode_id = "ep_" + secrets.token_hex(12)
     now = int(time.time())
     await repo.create_episode(
-        episode_id, body.asset_id, principal.subject, body.title.strip(),
-        body.description, body.category, body.visibility, 0.0, now,
+        episode_id, job.asset_id, principal.subject, body.title.strip(),
+        body.description, body.category, body.visibility, duration, now,
     )
     episode = await repo.get_episode(episode_id)
     return EpisodeResponse(**episode)

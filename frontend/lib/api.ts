@@ -199,6 +199,22 @@ export const api = {
       body: JSON.stringify({ token, new_password: newPassword }),
     }),
 
+  createStreamSession: (assetId: string) =>
+    request<{ session_id: string; expires_at: number }>(
+      `/v1/ab/streams/${assetId}/sessions`,
+      { method: "POST" },
+      true,
+    ),
+
+  getStreamPlaylist: async (sessionId: string): Promise<string> => {
+    const headers: Record<string, string> = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const res = await fetch(`${API_BASE}/v1/ab/streams/${sessionId}/playlist.m3u8`, { headers });
+    if (!res.ok) throw new ApiError(res.status, await res.text());
+    return res.text();
+  },
+
   setToken,
   getToken,
   API_BASE,

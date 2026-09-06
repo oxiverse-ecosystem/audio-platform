@@ -19,6 +19,7 @@ This is access control + traceability, NOT DRM. State plainly.
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import secrets
 import struct
@@ -28,6 +29,7 @@ from dataclasses import dataclass, field
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 from . import store
+from .media import encode_aac_transport_stream
 from .security import Principal
 from .store import MediaStore, URLSigner
 from .watermark_ab import WatermarkEngineSettings, build_manifest
@@ -35,7 +37,9 @@ from .watermark_ab import WatermarkEngineSettings, build_manifest
 
 SEGMENT_SECONDS = 2.0
 TARGET_LUFS = -16.0
-MIN_SEGMENTS_FOR_FULL_ID = 80  # RS-encoded codeword is 80 bits; need >= this many segments
+# RS-encoded codeword is 80 bits; clips shorter than this many segments lose full
+# leak attribution (the asset is no longer padded to the codeword length at ingest).
+MIN_SEGMENTS_FOR_FULL_ID = 80
 
 
 @dataclass
@@ -43,6 +47,8 @@ class StreamAssetRecord:
     asset_id: str
     creator_id: str | None
     n_segments: int
+    # one EXTINF length per segment (last may be trimmed to the true content length)
+    segment_durations: list[float]
     # per-asset AES-128 key (server-only, never in playlist)
     aes_key: bytes
     aes_iv: bytes
@@ -84,24 +90,30 @@ class ABStreamService:
             sr = sample_rate
             seg_len = int(SEGMENT_SECONDS * sr)
             n_seg = max(1, int(np.ceil(len(audio) / seg_len)))
-            if n_seg < MIN_SEGMENTS_FOR_FULL_ID:
-                pad = (MIN_SEGMENTS_FOR_FULL_ID - n_seg) * seg_len
-                audio = np.concatenate([audio, np.zeros(pad, dtype=np.float32)])
-                n_seg = MIN_SEGMENTS_FOR_FULL_ID
             key = os.urandom(16)
             iv = os.urandom(16)
+            durations: list[float] = []
             for variant in (0, 1):
+                durations = []
                 for s in range(n_seg):
                     start = s * seg_len
                     chunk = audio[start:start + seg_len]
-                    if len(chunk) < seg_len:
+                    if s == n_seg - 1 and len(chunk) < seg_len:
+                        # Trim the tail: pad only to whole AAC frames (1024 samples),
+                        # not a full segment, so playback ends at the real content length.
+                        padded = int(np.ceil(len(chunk) / 1024.0)) * 1024
+                        chunk = np.pad(chunk, (0, padded - len(chunk)))
+                    elif len(chunk) < seg_len:
                         chunk = np.pad(chunk, (0, seg_len - len(chunk)))
+                    durations.append(len(chunk) / sr)
                     watermarked = _embed_variant(chunk, sr, variant, self.wm_settings)
-                    enc = _aes_encrypt(watermarked.tobytes(), key, iv)
+                    ts = encode_aac_transport_stream(watermarked, None, sr)
+                    enc = _aes_encrypt(ts, key, iv)
                     self.store.put(f"assets/{asset_id}/v{variant}/{s:04d}.ts", enc)
             rec = StreamAssetRecord(
                 asset_id=asset_id, creator_id=creator_id, n_segments=n_seg,
-                aes_key=key, aes_iv=iv, created_at=int(time.time()),
+                segment_durations=durations, aes_key=key, aes_iv=iv,
+                created_at=int(time.time()),
             )
             self._assets[asset_id] = rec
             return rec
@@ -145,13 +157,17 @@ class ABStreamService:
         rec = self._assets[sess.asset_id]
         manifest = build_manifest(rec.asset_id, sess.listener_id, rec.n_segments, self.wm_settings)
         base = base_url.rstrip("/")
-        lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{int(SEGMENT_SECONDS)}",
+        target = max(2, int(math.ceil(max(rec.segment_durations))))
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{target}",
                  f"#EXT-X-MEDIA-SEQUENCE:0"]
         for s, variant in enumerate(manifest.choices):
             key_url = self.signer.sign(f"streams/{sess.session_id}/keys/main", 60)
             seg_url = self.signer.sign(f"assets/{rec.asset_id}/v{variant}/{s:04d}.ts", 3600)
-            lines.append(f'#EXT-X-KEY:METHOD=AES-128,URI="{base}/v1/ab/cdn/streams/{sess.session_id}/keys/main?tok={key_url}"')
-            lines.append(f"#EXTINF:{SEGMENT_SECONDS:.3f},")
+            lines.append(
+                f'#EXT-X-KEY:METHOD=AES-128,URI="{base}/v1/ab/cdn/streams/{sess.session_id}/keys/main?tok={key_url}",'
+                f'IV=0x{rec.aes_iv.hex()}'
+            )
+            lines.append(f"#EXTINF:{rec.segment_durations[s]:.3f},")
             lines.append(f"{base}/v1/ab/cdn/streams/{sess.session_id}/segments/{s:04d}.ts?tok={seg_url}")
         lines.append("#EXT-X-ENDLIST")
         return "\n".join(lines) + "\n"

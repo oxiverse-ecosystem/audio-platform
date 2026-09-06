@@ -20,8 +20,8 @@ from audio_streaming.security import issue_identity
 from audio_streaming.watermark_ab import recover_listener_id, embed_variant, WatermarkEngineSettings
 
 
-def _make_mastered_pcm(seconds: float = 140.0, sr: int = 48000) -> bytes:
-    """Synthesize a mastered-style PCM (>64 segments) as WAV bytes."""
+def _make_mastered_pcm(seconds: float = 191.3, sr: int = 48000) -> bytes:
+    """Synthesize a mastered-style PCM (>= 80 segments) as WAV bytes."""
     t = np.linspace(0, seconds, int(sr * seconds), endpoint=False)
     sig = (
         0.30 * np.sin(2 * np.pi * 150 * t)
@@ -74,6 +74,12 @@ def test_stream_ab_end_to_end():
             p2 = client.get(f"/v1/ab/streams/{s2}/playlist.m3u8").text
             assert p1 != p2, "per-listener manifests must differ (A/B personalization)"
 
+            # 2b) EXTINF durations must sum to the real content length: the last
+            # segment is trimmed to the true duration (no padded-silence tail).
+            extinf = [float(x.split(":")[1].rstrip(",")) for x in p1.splitlines() if x.startswith("#EXTINF:")]
+            assert extinf[-1] < 2.0, extinf[-1]
+            assert abs(sum(extinf) - 191.3) < 0.05, sum(extinf)
+
             # 3) signed segment serve works; tampered token -> 403
             seg_line = [l for l in p1.splitlines() if "/segments/" in l and l.startswith("http")][0]
             ok = client.get(seg_line)
@@ -103,3 +109,55 @@ def test_stream_ab_end_to_end():
     app.state.loop.close()
     if settings.data_dir.exists():
         shutil.rmtree(settings.data_dir)
+
+
+def test_carrier_is_band_limited_and_survives_aac_roundtrip():
+    """The watermark carrier must (1) sit inside the masked 2-4kHz band (no hiss in
+    6-20kHz) and (2) be recoverable after a real AAC encode/decode at an arbitrary
+    leak-window offset (codec priming)."""
+    import subprocess
+
+    from audio_streaming.media import encode_aac_transport_stream
+    from audio_streaming.watermark_ab import (
+        WatermarkEngineSettings, _band_limited_carrier, _max_lag_correlation,
+        build_manifest, embed_variant,
+    )
+
+    sr = 48000
+    settings = WatermarkEngineSettings()
+    n = sr * 2
+
+    # (1) spectral confinement: carrier energy must be in 2-4kHz, ~nothing above 6kHz.
+    carrier = _band_limited_carrier(n, sr, settings)
+    spec = np.fft.rfft(carrier)
+    freqs = np.fft.rfftfreq(n, 1.0 / sr)
+    power = np.abs(spec) ** 2
+    in_band = power[(freqs >= 2000) & (freqs <= 4000)].sum()
+    out_band = power[(freqs >= 6000) & (freqs <= 20000)].sum()
+    assert in_band > 1000 * out_band, f"carrier leaks out-of-band energy: {in_band:.1f} vs {out_band:.1f}"
+
+    # (2) per-segment sign evidence must survive AAC encode+decode at arbitrary offsets.
+    wm = build_manifest("assetT", 99, 10, settings)
+    rng = np.random.default_rng(3)
+    embedded = []
+    for i in range(10):
+        mod = 0.5 + 0.5 * np.sin(2 * np.pi * 3.5 * np.arange(n) / sr)
+        sig = (mod * rng.standard_normal(n) * 0.35).astype(np.float32)
+        embedded.append(embed_variant(sig, sr, wm.choices[i], settings))
+
+    ref = _band_limited_carrier(n, sr, settings)
+    correct = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        for i, e in enumerate(embedded):
+            ts = encode_aac_transport_stream(e, None, sr)
+            ts_path = f"{tmp}/s{i}.ts"
+            with open(ts_path, "wb") as fh:
+                fh.write(ts)
+            wav_path = f"{tmp}/s{i}.wav"
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", ts_path, wav_path], check=True)
+            decoded, _ = sf.read(wav_path, dtype="float32")
+            for offset in (0, 1024, 4096, 31337):  # arbitrary leak-window offsets
+                leak = np.ascontiguousarray(decoded[offset:])
+                c = _max_lag_correlation(leak, ref)
+                correct += (c >= 0) == (wm.choices[i] == 0)
+    assert correct == 40, f"only {correct}/40 segment-offset decisions survived AAC round-trip"

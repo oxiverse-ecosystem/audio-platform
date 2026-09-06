@@ -23,9 +23,11 @@ fragile sync marker.
 CARRIER
 -------
 A spread-spectrum carrier in a perceptually-masked band (~2-4 kHz), seeded from the
-asset secret so each asset uses a different pseudo-random pattern. Embedding flips the
-carrier sign between v0/v1; recovery correlates the leaked audio against both references
-and decides + or - per segment.
+asset secret so each asset uses a different pseudo-random pattern. The carrier is a
+deterministic PRNG passed through a 4-pole Butterworth bandpass (``_band_limited_carrier``)
+so its energy sits inside the masked band instead of adding full-band hiss. Embedding
+flips the carrier sign between v0/v1; recovery band-passes the same reference, correlates
+the leaked audio against it, and decides + or - per segment.
 
 This is the DSP baseline that survives re-encode / trimming / filtering (T1/T2). The
 pluggable DL slot for analog re-recording resilience (DeAR/DeepAWR) is deferred to P4 and
@@ -33,13 +35,14 @@ slots in behind the same ``WatermarkEngine`` interface used here.
 
 INTEGRITY NOTE
 --------------
-The embedding here uses a *direct* sign-flip of the carrier in the time domain (simple,
-deterministic, directly verifiable). It is robust to re-encoding and segment-aligned
-playback; it is NOT a substitute for a full transform-domain (DWT) scheme. The plan named
-DWT+perceptual-masking as the target; this implementation uses the time-domain carrier as
-the working baseline because it is auditable and test-covered, and the A/B delivery
-semantics (the scaling property) are identical regardless of carrier domain. Upgrading
-the embed domain is a localized change inside ``_embed_carrier``.
+The embedding here uses a *direct* sign-flip of a band-limited time-domain carrier
+(simple, deterministic, directly verifiable). It is robust to re-encoding and
+segment-aligned playback; it is NOT a substitute for a full transform-domain (DWT)
+scheme. The plan named DWT+perceptual-masking as the target; this implementation uses
+the time-domain carrier as the working baseline because it is auditable and
+test-covered, and the A/B delivery semantics (the scaling property) are identical
+regardless of carrier domain. Upgrading the embed domain is a localized change inside
+``_embed_carrier``.
 """
 
 from __future__ import annotations
@@ -49,6 +52,7 @@ import struct
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import butter, lfilter
 
 from reedsolo import RSCodec
 
@@ -85,6 +89,28 @@ def _prng(seed: bytes, n: int) -> np.ndarray:
     h = hashlib.sha256(seed).digest()
     rng = np.random.default_rng(int.from_bytes(h, "big"))
     return rng.standard_normal(n).astype(np.float64)
+
+
+def _band_limited_carrier(n: int, sample_rate: int,
+                          settings: WatermarkEngineSettings) -> np.ndarray:
+    """Deterministic band-limited carrier confined to ``carrier_hz_low..carrier_hz_high``.
+
+    The legacy carrier was unfiltered white noise (whole audible band), which read as
+    an audible hiss during speech. We now route the asset-keyed PRNG through a 4-pole
+    Butterworth bandpass so the energy sits exactly in the perceptually-masked region
+    the design always intended. Embedding and recovery both call this, so the reference
+    and the leak-detection mask stay in the same band.
+    """
+    carrier = _prng(settings.seed_key + b"carrier", n)
+    nyquist = sample_rate / 2.0
+    low = min(max(settings.carrier_hz_low, 20.0), nyquist * 0.45)
+    high = min(max(settings.carrier_hz_high, low + 1.0), nyquist * 0.95)
+    if low >= high:
+        return carrier
+    b, a = butter(4, [low / nyquist, high / nyquist], btype="bandpass")
+    filtered = lfilter(b, a, carrier)
+    rms = float(np.sqrt(np.mean(filtered ** 2)) + 1e-9)
+    return filtered / rms
 
 
 def _pack_codeword(listener_id: int, nsym: int = NSYM) -> tuple[bytes, int]:
@@ -141,16 +167,13 @@ def _embed_carrier(samples: np.ndarray, sample_rate: int, sign: int,
                    settings: WatermarkEngineSettings) -> np.ndarray:
     """Embed the asset-keyed spread-spectrum carrier with the given sign (+1 / -1).
 
-    Direct time-domain sign-flip carrier (auditable baseline). The carrier is confined to
-    a perceptual band by windowing the modulation in that band via a soft envelope; here we
-    keep it simple and robust: a band-limited pseudo-random carrier added at ``strength_db``.
+    A band-limited (2-4 kHz by default) pseudo-random carrier, scaled to
+    ``strength_db`` below the chunk's RMS, is added to the signal. Restricting the
+    carrier to the masking band keeps the added noise inaudible (no full-band hiss)
+    while the recovered correlation lives in the same band.
     """
     n = len(samples)
-    carrier = _prng(settings.seed_key + b"carrier", n)
-    # Band-limit the carrier with a gentle 2-pole low/high shaping: keep 2-4 kHz region.
-    # Simplest robust approach: modulate amplitude by a raised-cosine envelope so the
-    # carrier energy sits mid-band. We approximate by leaving the full-band PRNG (masked by
-    # low strength); a true band filter is a localized upgrade inside this function.
+    carrier = _band_limited_carrier(n, sample_rate, settings)
     sig_rms = float(np.sqrt(np.mean(samples ** 2)) + 1e-9)
     carrier_level = sig_rms * (10.0 ** (settings.strength_db / 20.0))
     out = samples.astype(np.float64) + sign * carrier_level * carrier
@@ -166,30 +189,49 @@ def embed_variant(samples: np.ndarray, sample_rate: int, variant: int,
     return _embed_carrier(samples, sample_rate, sign, settings)
 
 
+def _max_lag_correlation(seg: np.ndarray, ref: np.ndarray) -> float:
+    """Signed peak of the normalized circular cross-correlation of ``seg`` vs ``ref``.
+
+    Object detection must survive real delivery: every AAC segment carries a coding
+    priming delay, and a leaked clip can be windowed at an arbitrary offset. Instead of
+    dotting at (fixed) t=0, we compute the full circular cross-correlation via FFT and
+    return the value at the best lag, divided by the reference energy. The sign of that
+    peak is the evidence (+carrier / -carrier), the magnitude is the confidence.
+    """
+    n = len(ref)
+    if len(seg) > n:
+        seg = seg[:n]
+    elif len(seg) < n:
+        seg = np.pad(seg, (0, n - len(seg)))
+    c = np.fft.irfft(np.fft.rfft(seg) * np.conj(np.fft.rfft(ref)))
+    best = int(np.argmax(np.abs(c)))
+    return float(c[best]) / (float(np.dot(ref, ref)) + 1e-12)
+
+
 def recover_listener_id(segments_with_signals: list[np.ndarray], sample_rate: int,
                         settings: WatermarkEngineSettings | None = None) -> int | None:
     """Recover the listener id from a (possibly partial) leaked clip.
 
     Time-order-agnostic: we aggregate per-segment evidence of + vs - carrier correlation
     across ALL provided segments, then de-interleave by majority vote per codeword bit and
-    RS+CRC decode. Returns the listener_id or None if CRC fails.
+    RS+CRC decode. Each segment's evidence is the peak of the cross-correlation over all
+    lags (see ``_max_lag_correlation``), so codec priming delays or arbitrary leak-window
+    offsets do not need to be known a priori. Returns the listener_id or None if CRC fails.
     """
     settings = settings or WatermarkEngineSettings()
     if not segments_with_signals:
         return None
     n = max(len(s) for s in segments_with_signals)
-    carrier = _prng(settings.seed_key + b"carrier", n)
-    sig_rms = float(np.sqrt(np.mean(np.concatenate([s.astype(np.float64) for s in segments_with_signals]) ** 2)) + 1e-9)
-    carrier_level = sig_rms * (10.0 ** (settings.strength_db / 20.0)) + 1e-9
+    carrier = _band_limited_carrier(n, sample_rate, settings)
 
-    # Per-segment correlation with +carrier and -carrier (normalized).
+    # Per-segment correlation with the band-limited reference, made codec-delay
+    # robust: normalize by the carrier norm and take the peak over ALL circular
+    # lags, so AAC priming / split guess / trimming never destroys the evidence.
     plus = []
     minus = []
     for s in segments_with_signals:
         seg = s.astype(np.float64)
-        if len(seg) < n:
-            seg = np.pad(seg, (0, n - len(seg)))
-        c = np.dot(seg, carrier) / (np.dot(carrier, carrier) + 1e-12)
+        c = _max_lag_correlation(seg, carrier)
         plus.append(c)
         minus.append(-c)
     plus = np.array(plus)

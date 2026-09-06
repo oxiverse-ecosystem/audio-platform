@@ -41,3 +41,4 @@ runtime-data/
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+*.tsbuildinfo

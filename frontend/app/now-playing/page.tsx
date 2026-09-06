@@ -3,15 +3,17 @@
 import { useEffect, useRef, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
-import { Player } from "@/components/Player";
 import { api, EpisodeResponse } from "@/lib/api";
+import { useAudioPlayer } from "@/context/AudioPlayerContext";
 import {
   Sparkles,
   Gauge,
   Rewind,
   Pause,
+  Play,
   FastForward,
   Volume2,
+  VolumeX,
   ShieldCheck,
   Loader2,
   Mic2,
@@ -23,11 +25,35 @@ function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatHours(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+const SPEEDS = [1, 1.25, 1.5, 2];
+
 function NowPlayingContent() {
   const params = useSearchParams();
   const [episode, setEpisode] = useState<EpisodeResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [quota, setQuota] = useState<{ total_duration_seconds: number } | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const {
+    episode: activeEpisode,
+    isPlaying,
+    currentTime,
+    duration,
+    volume,
+    playbackRate,
+    loading: playerLoading,
+    play,
+    togglePlay,
+    seek,
+    setVolume,
+    setPlaybackRate,
+  } = useAudioPlayer();
 
   const episodeId = params.get("id");
 
@@ -42,6 +68,19 @@ function NowPlayingContent() {
       .finally(() => setLoading(false));
   }, [episodeId]);
 
+  useEffect(() => {
+    api.getMyAnalytics()
+      .then((d) => setQuota({ total_duration_seconds: d.total_duration_seconds }))
+      .catch(() => setQuota(null));
+  }, []);
+
+  // Auto-play when episode loads
+  useEffect(() => {
+    if (episode && episode.episode_id !== activeEpisode?.episode_id) {
+      play(episode);
+    }
+  }, [episode]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Generate waveform bars
   useEffect(() => {
     const container = containerRef.current;
@@ -53,10 +92,21 @@ function NowPlayingContent() {
       bar.className = "waveform-bar";
       const height = Math.floor(Math.random() * 90) + 10;
       bar.style.height = `${height}%`;
-      if (i < numBars * 0.3) bar.classList.add("active");
+      // Highlight bars based on progress
+      const progress = duration > 0 ? currentTime / duration : 0;
+      if (i < numBars * progress) bar.classList.add("active");
       container.appendChild(bar);
     }
-  }, [episode]);
+  }, [episode, currentTime, duration]);
+
+  // Waveform click to seek
+  const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const container = containerRef.current;
+    if (!container || duration <= 0) return;
+    const rect = container.getBoundingClientRect();
+    const pct = (e.clientX - rect.left) / rect.width;
+    seek(pct * duration);
+  };
 
   if (loading) {
     return (
@@ -81,6 +131,8 @@ function NowPlayingContent() {
     );
   }
 
+  const displayDuration = duration || episode.duration_seconds;
+
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
@@ -103,9 +155,11 @@ function NowPlayingContent() {
             <div className="hidden sm:flex flex-col items-end bg-surface-container-low p-3 rounded-lg border border-outline-variant shadow-sm">
               <span className="font-label-sm text-label-sm text-on-surface-variant mb-1">Audio Processing Quota</span>
               <div className="w-32 h-2 bg-surface-variant rounded-full overflow-hidden">
-                <div className="h-full bg-primary w-[65%]" />
+                <div className="h-full bg-primary" style={{ width: quota ? `${Math.min(100, (quota.total_duration_seconds / 21600) * 100)}%` : "65%" }} />
               </div>
-              <span className="font-caption text-caption text-on-surface-variant mt-1">65% Used (12h remaining)</span>
+              <span className="font-caption text-caption text-on-surface-variant mt-1">
+                {quota ? `${Math.min(100, Math.round((quota.total_duration_seconds / 21600) * 100))}% Used (${formatHours(21600 - quota.total_duration_seconds)} remaining)` : "65% Used (12h remaining)"}
+              </span>
             </div>
           </header>
 
@@ -116,30 +170,75 @@ function NowPlayingContent() {
             </div>
 
             {/* Waveform */}
-            <div ref={containerRef} className="w-full h-32 flex items-center justify-between mb-stack-md" />
+            <div
+              ref={containerRef}
+              className="w-full h-32 flex items-center justify-between mb-stack-md cursor-pointer"
+              onClick={handleWaveformClick}
+            />
 
             <div className="flex justify-between font-label-sm text-label-sm text-on-surface-variant mb-stack-lg">
-              <span>0:00</span>
-              <span>{formatDuration(episode.duration_seconds)}</span>
+              <span>{formatDuration(currentTime)}</span>
+              <span>{formatDuration(displayDuration)}</span>
             </div>
 
             <div className="flex items-center justify-center gap-6 sm:gap-12">
-              <button className="text-on-surface-variant hover:text-primary transition-colors flex flex-col items-center gap-1">
+              <button
+                onClick={() => {
+                  const speeds = SPEEDS;
+                  const idx = speeds.indexOf(playbackRate);
+                  setPlaybackRate(speeds[(idx + 1) % speeds.length]);
+                }}
+                className="text-on-surface-variant hover:text-primary transition-colors flex flex-col items-center gap-1"
+              >
                 <Gauge className="w-6 h-6" strokeWidth={1.5} />
-                <span className="font-label-sm text-label-sm">1.5x</span>
+                <span className="font-label-sm text-label-sm">{playbackRate}x</span>
               </button>
-              <button className="text-on-surface-variant hover:text-primary transition-colors flex flex-col items-center gap-1">
+              <button
+                onClick={() => seek(Math.max(0, currentTime - 15))}
+                className="text-on-surface hover:text-primary transition-colors"
+              >
                 <Rewind className="w-10 h-10" strokeWidth={1.5} />
               </button>
-              <button className="w-20 h-20 bg-primary rounded-full flex items-center justify-center text-on-primary hover:bg-primary-container transition-colors shadow-sm">
-                <Pause className="w-10 h-10" strokeWidth={1.5} />
+              <button
+                onClick={togglePlay}
+                disabled={playerLoading}
+                className="w-20 h-20 bg-primary rounded-full flex items-center justify-center text-on-primary hover:bg-primary-container transition-colors shadow-sm disabled:opacity-50"
+              >
+                {playerLoading ? (
+                  <Loader2 className="w-10 h-10 animate-spin" strokeWidth={1.5} />
+                ) : isPlaying ? (
+                  <Pause className="w-10 h-10" strokeWidth={1.5} />
+                ) : (
+                  <Play className="w-10 h-10" strokeWidth={1.5} />
+                )}
               </button>
-              <button className="text-on-surface hover:text-primary transition-colors">
+              <button
+                onClick={() => seek(Math.min(displayDuration, currentTime + 30))}
+                className="text-on-surface hover:text-primary transition-colors"
+              >
                 <FastForward className="w-10 h-10" strokeWidth={1.5} />
               </button>
-              <button className="text-on-surface-variant hover:text-primary transition-colors flex flex-col items-center gap-1">
-                <Volume2 className="w-6 h-6" strokeWidth={1.5} />
-              </button>
+              <div className="flex flex-col items-center gap-1">
+                <button
+                  onClick={() => setVolume(volume > 0 ? 0 : 1)}
+                  className="text-on-surface-variant hover:text-primary transition-colors"
+                >
+                  {volume === 0 ? (
+                    <VolumeX className="w-6 h-6" strokeWidth={1.5} />
+                  ) : (
+                    <Volume2 className="w-6 h-6" strokeWidth={1.5} />
+                  )}
+                </button>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
+                  className="w-16 h-1 accent-primary cursor-pointer"
+                />
+              </div>
             </div>
           </section>
         </div>
@@ -156,7 +255,7 @@ function NowPlayingContent() {
                 {episode.category}
               </span>
               <span className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
-                {formatDuration(episode.duration_seconds)}
+                {formatDuration(displayDuration)}
               </span>
               <span className="bg-surface-container px-2 py-1 rounded font-label-sm text-label-sm text-on-surface-variant">
                 {episode.play_count} plays
@@ -193,7 +292,6 @@ function NowPlayingContent() {
           </p>
         </aside>
       </main>
-      <Player />
     </div>
   );
 }
