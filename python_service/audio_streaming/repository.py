@@ -116,7 +116,6 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS episodes_created ON episodes(created_at DESC);
 CREATE INDEX IF NOT EXISTS episodes_category ON episodes(category, created_at DESC);
 CREATE INDEX IF NOT EXISTS episodes_creator ON episodes(creator_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS episodes_status ON episodes(status, created_at DESC);
 CREATE TABLE IF NOT EXISTS episode_plays (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     episode_id TEXT NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
@@ -144,16 +143,18 @@ class Repository:
             self._connection = sqlite3.connect(self._path, check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
             self._connection.executescript(SCHEMA)
+
             # Automatic schema migration for existing sqlite db files
-            for col, spec in [
-                ("status", "TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','processing','ready','published'))"),
-                ("publish_on_ready", "INTEGER NOT NULL DEFAULT 0"),
-                ("waveform_peaks", "TEXT"),
-            ]:
-                try:
-                    self._connection.execute(f"ALTER TABLE episodes ADD COLUMN {col} {spec}")
-                except sqlite3.OperationalError:
-                    pass
+            cols = {row["name"] for row in self._connection.execute("PRAGMA table_info(episodes)").fetchall()}
+            if "status" not in cols:
+                self._connection.execute("ALTER TABLE episodes ADD COLUMN status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','processing','ready','published'))")
+            if "publish_on_ready" not in cols:
+                self._connection.execute("ALTER TABLE episodes ADD COLUMN publish_on_ready INTEGER NOT NULL DEFAULT 0")
+            if "waveform_peaks" not in cols:
+                self._connection.execute("ALTER TABLE episodes ADD COLUMN waveform_peaks TEXT")
+
+            # Create index after columns are ensured
+            self._connection.execute("CREATE INDEX IF NOT EXISTS episodes_status ON episodes(status, created_at DESC)")
             self._connection.commit()
 
     async def close(self) -> None:
