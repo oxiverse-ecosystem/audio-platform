@@ -198,7 +198,7 @@ export default function NewDropPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-grow overflow-y-auto bg-surface-bright relative md:pl-sidebar">
+      <main className="flex-grow min-w-0 overflow-x-hidden overflow-y-auto bg-surface-bright relative md:pl-sidebar pt-14 md:pt-0 pb-24">
         <div className="max-w-container-max mx-auto px-margin-desktop py-stack-lg">
           <header className="mb-stack-lg flex justify-between items-end">
             <div>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function LoginForm() {
   const { login, error, clearError } = useAuth();
@@ -42,7 +43,10 @@ function LoginForm() {
   const displayError = localError || error;
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+      <div className="absolute top-6 right-6">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         <div className="text-center mb-stack-lg">
           <Link href="/" className="font-headline-lg text-headline-lg text-primary">

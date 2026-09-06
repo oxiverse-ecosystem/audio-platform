@@ -1,23 +1,83 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
-import { Mic, Play, Sparkles, Lock, DollarSign, ShieldCheck, type LucideIcon } from "lucide-react";
+import { Mic, Play, Sparkles, Lock, DollarSign, ShieldCheck, Menu, X, type LucideIcon } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function Landing() {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   return (
     <>
       {/* TopNavBar */}
-      <header className="fixed top-0 left-0 w-full z-50 flex justify-between items-center px-margin-desktop py-4 bg-surface/80 backdrop-blur-md border-b border-outline-variant">
-        <div className="flex items-center gap-8">
-          <span className="font-headline-md text-headline-md font-bold text-primary">Oxiverse Audio</span>
-          <nav className="hidden md:flex gap-6">
-            <Link className="font-body-md text-body-md text-primary font-bold border-b-2 border-primary pb-1" href="/discovery">Listen</Link>
-            <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors" href="/creator">For Creators</Link>
-            <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors" href="/account">Pricing</Link>
-          </nav>
+      <header className="fixed top-0 left-0 w-full z-50 px-4 md:px-margin-desktop py-4 bg-surface/90 backdrop-blur-md border-b border-outline-variant">
+        <div className="flex justify-between items-center max-w-container-max mx-auto">
+          <div className="flex items-center gap-8">
+            <span className="font-headline-md text-headline-md font-bold text-primary">Oxiverse Audio</span>
+            <nav className="hidden md:flex gap-6">
+              <Link className="font-body-md text-body-md text-primary font-bold border-b-2 border-primary pb-1" href="/discovery">Listen</Link>
+              <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors" href="/creator">For Creators</Link>
+              <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors" href="/account">Pricing</Link>
+            </nav>
+          </div>
+          <div className="flex items-center gap-3 md:gap-4">
+            <ThemeToggle />
+            <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors hidden md:block" href="/login">Login</Link>
+            <Link className="bg-primary text-on-primary font-body-md text-body-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity active:opacity-80 hidden sm:inline-block" href="/signup">Sign Up</Link>
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              type="button"
+              className="md:hidden w-9 h-9 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" strokeWidth={1.5} /> : <Menu className="w-5 h-5" strokeWidth={1.5} />}
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-4">
-          <Link className="font-body-md text-body-md text-on-surface-variant hover:text-primary transition-colors hidden md:block" href="/login">Login</Link>
-          <Link className="bg-primary text-on-primary font-body-md text-body-md px-4 py-2 rounded-lg hover:opacity-90 transition-opacity active:opacity-80" href="/signup">Sign Up</Link>
-        </div>
+
+        {/* Mobile menu dropdown */}
+        {mobileMenuOpen && (
+          <div className="md:hidden pt-4 pb-2 border-t border-outline-variant/40 mt-3 flex flex-col gap-2">
+            <Link
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 rounded-lg font-body-md text-body-md text-primary font-semibold hover:bg-surface-container-high"
+              href="/discovery"
+            >
+              Listen
+            </Link>
+            <Link
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
+              href="/creator"
+            >
+              For Creators
+            </Link>
+            <Link
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 rounded-lg font-body-md text-body-md text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high"
+              href="/account"
+            >
+              Pricing
+            </Link>
+            <div className="flex items-center gap-3 pt-2 mt-2 border-t border-outline-variant/30">
+              <Link
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex-1 text-center py-2 rounded-lg border border-outline-variant font-body-md text-body-md text-on-surface hover:bg-surface-container-high"
+                href="/login"
+              >
+                Login
+              </Link>
+              <Link
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex-1 text-center py-2 rounded-lg bg-primary text-on-primary font-body-md text-body-md hover:opacity-90"
+                href="/signup"
+              >
+                Sign Up
+              </Link>
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-grow">

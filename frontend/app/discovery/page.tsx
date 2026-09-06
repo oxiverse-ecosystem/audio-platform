@@ -78,9 +78,9 @@ export default function DiscoveryPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 flex flex-col md:flex-row min-w-0 overflow-hidden md:pl-sidebar">
+      <main className="flex-1 flex flex-col md:flex-row min-w-0 overflow-hidden md:pl-sidebar pt-14 md:pt-0">
         {/* Center Canvas */}
-        <div className="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-stack-lg hide-scrollbar">
+        <div className="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-stack-lg pb-24 hide-scrollbar">
           <div className="max-w-container-max mx-auto mb-stack-lg space-y-stack-lg">
             {user && (
               <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/40 shadow-sm overflow-hidden">

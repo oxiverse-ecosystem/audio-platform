@@ -84,8 +84,8 @@ export default function CreatorDashboardPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto p-margin-mobile md:p-margin-desktop md:pl-sidebar">
-        <div className="max-w-container-max mx-auto space-y-stack-lg">
+      <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto md:pl-sidebar pt-14 md:pt-0 pb-24">
+        <div className="max-w-container-max mx-auto p-margin-mobile md:p-margin-desktop space-y-stack-lg">
           <header className="flex justify-between items-end pb-stack-md border-b border-outline-variant/50">
             <div>
               <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-2">

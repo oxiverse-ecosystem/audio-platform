@@ -136,7 +136,8 @@ function NowPlayingContent() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 md:pl-sidebar p-margin-mobile md:p-margin-desktop flex flex-col xl:flex-row gap-gutter">
+      <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto md:pl-sidebar pt-14 md:pt-0 pb-24">
+        <div className="p-margin-mobile md:p-margin-desktop flex flex-col xl:flex-row gap-gutter">
         {/* Player column */}
         <div className="flex-1 flex flex-col gap-stack-lg max-w-4xl">
           <header className="flex justify-between items-start">
@@ -285,6 +286,7 @@ function NowPlayingContent() {
             This stream is forensically watermarked for your security.
           </p>
         </aside>
+        </div>
       </main>
     </div>
   );

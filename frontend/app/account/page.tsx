@@ -14,9 +14,15 @@ import {
   MoreVertical,
   Plus,
   Loader2,
+  Palette,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
+import { ThemeSelector } from "@/components/ThemeToggle";
+import { useTheme } from "@/context/ThemeContext";
 
-type Tab = "plan" | "usage" | "security";
+type Tab = "plan" | "usage" | "appearance" | "security";
 
 export default function AccountPage() {
   const { user, loading } = useAuth();
@@ -48,23 +54,25 @@ export default function AccountPage() {
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
-      <main className="flex-1 overflow-y-auto bg-surface relative md:pl-sidebar">
+      <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto bg-surface relative md:pl-sidebar pt-14 md:pt-0 pb-24">
         <div className="max-w-container-max mx-auto p-margin-mobile md:p-margin-desktop pb-32">
           <div className="mb-stack-lg">
             <h1 className="font-headline-lg text-headline-lg hidden md:block text-on-surface mb-2">Account Settings</h1>
             <p className="font-body-md text-body-md text-on-surface-variant">
-              Manage your billing, monitor usage, and configure security preferences.
+              Manage your billing, monitor usage, customize appearance, and configure security preferences.
             </p>
           </div>
 
           <div className="flex gap-4 border-b border-surface-variant mb-stack-lg overflow-x-auto">
             <TabBtn id="plan" label="Plan & Billing" tab={tab} setTab={setTab} />
             <TabBtn id="usage" label="Usage Metrics" tab={tab} setTab={setTab} />
+            <TabBtn id="appearance" label="Appearance & Theme" tab={tab} setTab={setTab} />
             <TabBtn id="security" label="Security & Privacy" tab={tab} setTab={setTab} />
           </div>
 
           {tab === "plan" && <PlanTab />}
           {tab === "usage" && <UsageTab />}
+          {tab === "appearance" && <AppearanceTab />}
           {tab === "security" && <SecurityTab user={user} />}
         </div>
       </main>
@@ -167,6 +175,97 @@ function UsageTab() {
         <button className="bg-surface-container text-on-surface font-caption text-caption py-2 px-6 rounded-lg border border-outline-variant hover:bg-surface-variant transition-colors flex items-center gap-2">
           <Download className="w-4 h-4" strokeWidth={1.5} /> Export Usage Log
         </button>
+      </div>
+    </div>
+  );
+}
+
+function AppearanceTab() {
+  const { theme, setTheme, resolvedTheme } = useTheme();
+
+  return (
+    <div className="max-w-3xl space-y-stack-md">
+      <div className="bg-surface-container-lowest rounded-xl p-6 border border-outline-variant/50 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="p-3 bg-secondary-container rounded-lg text-on-secondary-container">
+            <Palette className="w-5 h-5" strokeWidth={1.5} />
+          </div>
+          <div className="flex-1">
+            <h3 className="font-caption text-caption font-semibold text-on-surface mb-1">
+              Interface Theme
+            </h3>
+            <p className="font-body-md text-body-md text-on-surface-variant mb-6">
+              Customize how Oxiverse Audio looks on your device. Choose between Light, Dark, or automatically match your system appearance.
+            </p>
+
+            <div className="mb-6">
+              <ThemeSelector />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4 border-t border-outline-variant/30">
+              <button
+                type="button"
+                onClick={() => setTheme("light")}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                  theme === "light"
+                    ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary"
+                    : "border-outline-variant/40 hover:border-outline-variant hover:bg-surface-container-high/30"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Sun className="w-4 h-4 text-amber-500" strokeWidth={1.5} />
+                  <span className="font-caption text-caption font-semibold text-on-surface">Light</span>
+                </div>
+                <p className="font-label-sm text-label-sm text-on-surface-variant">
+                  Crisp daytime display with high clarity.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTheme("dark")}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                  theme === "dark"
+                    ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary"
+                    : "border-outline-variant/40 hover:border-outline-variant hover:bg-surface-container-high/30"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Moon className="w-4 h-4 text-primary" strokeWidth={1.5} />
+                  <span className="font-caption text-caption font-semibold text-on-surface">Dark</span>
+                </div>
+                <p className="font-label-sm text-label-sm text-on-surface-variant">
+                  Deep slate interface built for focused listening.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTheme("system")}
+                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                  theme === "system"
+                    ? "border-primary bg-primary/5 shadow-sm ring-1 ring-primary"
+                    : "border-outline-variant/40 hover:border-outline-variant hover:bg-surface-container-high/30"
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Monitor className="w-4 h-4 text-outline" strokeWidth={1.5} />
+                  <span className="font-caption text-caption font-semibold text-on-surface">System</span>
+                </div>
+                <p className="font-label-sm text-label-sm text-on-surface-variant">
+                  Automatically syncs with your device settings.
+                </p>
+              </button>
+            </div>
+
+            <div className="mt-6 flex items-center justify-between p-3 rounded-lg bg-surface-container-low border border-outline-variant/30">
+              <span className="font-caption text-caption text-on-surface">Currently Active</span>
+              <span className="font-label-sm text-label-sm px-2.5 py-1 rounded bg-surface-container-high text-primary font-semibold uppercase tracking-wider">
+                {resolvedTheme} Mode
+              </span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

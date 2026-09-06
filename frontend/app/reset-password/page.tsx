@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
 import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function ResetPasswordForm() {
   const params = useSearchParams();
@@ -48,7 +49,10 @@ function ResetPasswordForm() {
 
   if (!token) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+        <div className="absolute top-6 right-6">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-md text-center">
           <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant/50">
             <XCircle className="w-12 h-12 text-error mx-auto mb-4" />
@@ -67,7 +71,10 @@ function ResetPasswordForm() {
 
   if (success) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+        <div className="absolute top-6 right-6">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-md text-center">
           <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant/50">
             <CheckCircle2 className="w-12 h-12 text-primary mx-auto mb-4" />
@@ -85,7 +92,10 @@ function ResetPasswordForm() {
   }
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+      <div className="absolute top-6 right-6">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         <div className="text-center mb-stack-lg">
           <Link href="/" className="font-headline-lg text-headline-lg text-primary">

@@ -6,16 +6,125 @@
   --font-display: "Geist", sans-serif;
   --font-body: "Inter", sans-serif;
   --font-label: "JetBrains Mono", monospace;
+
+  /* Stitch Oxiverse Light Design Tokens (RGB channels) */
+  --surface: 247 249 251;
+  --surface-bright: 247 249 251;
+  --surface-dim: 216 218 220;
+  --surface-variant: 224 227 229;
+  --surface-container: 236 238 240;
+  --surface-container-low: 242 244 246;
+  --surface-container-lowest: 255 255 255;
+  --surface-container-high: 230 232 234;
+  --surface-container-highest: 224 227 229;
+  --surface-tint: 73 75 214;
+  --background: 247 249 251;
+  --on-background: 25 28 30;
+  --on-surface: 25 28 30;
+  --on-surface-variant: 70 69 84;
+  --inverse-surface: 45 49 51;
+  --inverse-on-surface: 239 241 243;
+  --outline: 118 117 134;
+  --outline-variant: 199 196 215;
+  --primary: 70 72 212;
+  --on-primary: 255 255 255;
+  --primary-container: 96 99 238;
+  --on-primary-container: 255 251 255;
+  --inverse-primary: 192 193 255;
+  --primary-fixed: 225 224 255;
+  --primary-fixed-dim: 192 193 255;
+  --on-primary-fixed: 7 0 108;
+  --on-primary-fixed-variant: 47 46 190;
+  --secondary: 86 94 116;
+  --on-secondary: 255 255 255;
+  --secondary-container: 218 226 253;
+  --on-secondary-container: 92 100 122;
+  --secondary-fixed: 218 226 253;
+  --secondary-fixed-dim: 190 198 224;
+  --on-secondary-fixed: 19 27 46;
+  --on-secondary-fixed-variant: 63 70 92;
+  --tertiary: 144 73 0;
+  --on-tertiary: 255 255 255;
+  --tertiary-container: 181 93 0;
+  --on-tertiary-container: 255 251 255;
+  --tertiary-fixed: 255 220 197;
+  --tertiary-fixed-dim: 255 183 131;
+  --on-tertiary-fixed: 48 20 0;
+  --on-tertiary-fixed-variant: 112 55 0;
+  --error: 186 26 26;
+  --on-error: 255 255 255;
+  --error-container: 255 218 214;
+  --on-error-container: 147 0 10;
+}
+
+.dark {
+  /* Stitch Oxiverse Dark Design Tokens (RGB channels) */
+  --surface: 17 19 21;
+  --surface-bright: 25 28 32;
+  --surface-dim: 17 19 21;
+  --surface-variant: 36 40 48;
+  --surface-container: 22 25 29;
+  --surface-container-low: 19 21 25;
+  --surface-container-lowest: 13 15 17;
+  --surface-container-high: 31 35 41;
+  --surface-container-highest: 40 45 53;
+  --surface-tint: 125 128 255;
+  --background: 17 19 21;
+  --on-background: 240 242 245;
+  --on-surface: 240 242 245;
+  --on-surface-variant: 165 168 180;
+  --inverse-surface: 240 242 245;
+  --inverse-on-surface: 25 28 30;
+  --outline: 131 136 150;
+  --outline-variant: 45 50 62;
+  --primary: 125 128 255;
+  --on-primary: 255 255 255;
+  --primary-container: 70 72 212;
+  --on-primary-container: 238 239 255;
+  --inverse-primary: 70 72 212;
+  --primary-fixed: 39 42 90;
+  --primary-fixed-dim: 125 128 255;
+  --on-primary-fixed: 238 239 255;
+  --on-primary-fixed-variant: 192 194 255;
+  --secondary: 184 192 214;
+  --on-secondary: 34 41 56;
+  --secondary-container: 42 47 62;
+  --on-secondary-container: 218 226 253;
+  --secondary-fixed: 42 47 62;
+  --secondary-fixed-dim: 184 192 214;
+  --on-secondary-fixed: 218 226 253;
+  --on-secondary-fixed-variant: 184 192 214;
+  --tertiary: 255 183 124;
+  --on-tertiary: 76 37 0;
+  --tertiary-container: 110 57 0;
+  --on-tertiary-container: 255 220 189;
+  --tertiary-fixed: 255 220 189;
+  --tertiary-fixed-dim: 255 183 124;
+  --on-tertiary-fixed: 48 20 0;
+  --on-tertiary-fixed-variant: 112 55 0;
+  --error: 255 180 171;
+  --on-error: 105 0 5;
+  --error-container: 132 20 25;
+  --on-error-container: 255 218 214;
 }
 
 html {
   scroll-behavior: smooth;
 }
 
+html.light {
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
 body {
-  background-color: #f7f9fb;
-  color: #191c1e;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--on-surface));
   font-family: var(--font-body);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Hide scrollbar utility used in Stitch layout */
@@ -31,16 +140,17 @@ body {
 .waveform-bar {
   width: 3px;
   border-radius: 9999px;
-  background-color: #c7c4d7; /* outline-variant */
+  background-color: rgb(var(--outline-variant));
   flex-shrink: 0;
+  transition: background-color 0.2s ease;
 }
 .waveform-bar.active {
-  background-color: #6063ee; /* primary-container */
+  background-color: rgb(var(--primary-container));
 }
 
 /* Mobile nav spacing helper */
 @media (min-width: 768px) {
   .md\:pl-sidebar {
-    padding-left: 18rem;
+    padding-left: 18rem !important;
   }
 }

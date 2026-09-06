@@ -1,7 +1,8 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { Play, Pause, Volume2, Mic2 } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Mic2 } from "lucide-react";
 import { useAudioPlayer } from "@/context/AudioPlayerContext";
 
 function formatDuration(seconds: number): string {
@@ -11,7 +12,8 @@ function formatDuration(seconds: number): string {
 }
 
 export function Player() {
-  const { episode, isPlaying, currentTime, duration, togglePlay, seek } = useAudioPlayer();
+  const { episode, isPlaying, currentTime, duration, volume, togglePlay, seek, setVolume } = useAudioPlayer();
+  const [showVolume, setShowVolume] = useState(false);
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
@@ -60,7 +62,44 @@ export function Player() {
                 <Play className="w-5 h-5 ml-0.5" strokeWidth={1.5} />
               )}
             </button>
-            <Volume2 className="w-5 h-5 text-outline cursor-pointer hover:text-primary transition-colors hidden sm:block" strokeWidth={1.5} />
+            <div className="relative hidden sm:block">
+              {showVolume && (
+                <div className="absolute bottom-full right-0 mb-2 bg-surface-container-lowest border border-outline-variant/40 rounded-lg shadow-lg p-3 flex items-center gap-2 z-50">
+                  <button
+                    onClick={() => setVolume(volume > 0 ? 0 : 1)}
+                    className="text-outline hover:text-primary transition-colors"
+                    aria-label={volume === 0 ? "Unmute" : "Mute"}
+                  >
+                    {volume === 0 ? (
+                      <VolumeX className="w-4 h-4" strokeWidth={1.5} />
+                    ) : (
+                      <Volume2 className="w-4 h-4" strokeWidth={1.5} />
+                    )}
+                  </button>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={volume}
+                    onChange={(e) => setVolume(parseFloat(e.target.value))}
+                    className="w-24 accent-primary cursor-pointer"
+                    aria-label="Volume"
+                  />
+                </div>
+              )}
+              <button
+                onClick={() => setShowVolume((v) => !v)}
+                className="flex items-center justify-center text-outline hover:text-primary transition-colors p-1"
+                aria-label="Volume"
+              >
+                {volume === 0 ? (
+                  <VolumeX className="w-5 h-5" strokeWidth={1.5} />
+                ) : (
+                  <Volume2 className="w-5 h-5" strokeWidth={1.5} />
+                )}
+              </button>
+            </div>
           </div>
         </>
       ) : (

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 type Status = "verifying" | "success" | "error";
 
@@ -32,7 +33,10 @@ function VerifyEmailForm() {
   }, [params, verifyEmail]);
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+      <div className="absolute top-6 right-6">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md text-center">
         <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant/50">
           {status === "verifying" && (

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { api, ApiError } from "@/lib/api";
 import { Mail, Loader2, CheckCircle2 } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 function ForgotPasswordForm() {
   const { clearError } = useAuth();
@@ -33,7 +34,10 @@ function ForgotPasswordForm() {
 
   if (sent) {
     return (
-      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+      <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+        <div className="absolute top-6 right-6">
+          <ThemeToggle />
+        </div>
         <div className="w-full max-w-md text-center">
           <div className="bg-surface-container-lowest rounded-xl p-8 border border-outline-variant/50">
             <CheckCircle2 className="w-12 h-12 text-primary mx-auto mb-4" />
@@ -51,7 +55,10 @@ function ForgotPasswordForm() {
   }
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile">
+    <div className="min-h-screen bg-surface flex items-center justify-center p-margin-mobile relative">
+      <div className="absolute top-6 right-6">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-md">
         <div className="text-center mb-stack-lg">
           <Link href="/" className="font-headline-lg text-headline-lg text-primary">
