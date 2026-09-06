@@ -34,6 +34,12 @@ class RecordPlayRequest(BaseModel):
     completed: bool = False
 
 
+class UpdateEpisodeRequest(BaseModel):
+    title: str | None = None
+    description: str | None = None
+    category: str | None = None
+
+
 class EpisodeResponse(BaseModel):
     episode_id: str
     asset_id: str
@@ -145,6 +151,18 @@ async def list_drafts(
     return {"drafts": drafts}
 
 
+@router.get("/episodes/me")
+async def get_my_episodes(
+    request: Request,
+    principal: Annotated[Principal, Depends(require_principal)],
+    status: str | None = None,
+):
+    """Get episodes by the authenticated creator (optionally filtered by status)."""
+    repo = _repo(request)
+    episodes = await repo.get_creator_episodes(principal.subject, status=status)
+    return {"episodes": episodes}
+
+
 @router.get("/episodes/{episode_id}", response_model=EpisodeResponse)
 async def get_episode(request: Request, episode_id: str):
     """Get a single episode by id."""
@@ -153,6 +171,52 @@ async def get_episode(request: Request, episode_id: str):
     if episode is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="episode not found")
     return EpisodeResponse(**episode)
+
+
+@router.patch("/episodes/{episode_id}", response_model=EpisodeResponse)
+async def update_episode(
+    request: Request,
+    episode_id: str,
+    body: UpdateEpisodeRequest,
+    principal: Annotated[Principal, Depends(require_principal)],
+):
+    """Update draft or published episode metadata (title, description, category)."""
+    repo = _repo(request)
+    episode = await repo.get_episode(episode_id)
+    if episode is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="episode not found")
+    if episode["creator_id"] != principal.subject:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your episode")
+
+    if body.title is not None and not body.title.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="title cannot be empty")
+
+    await repo.update_episode_metadata(
+        episode_id,
+        title=body.title,
+        description=body.description,
+        category=body.category,
+    )
+    updated = await repo.get_episode(episode_id)
+    return EpisodeResponse(**updated)
+
+
+@router.delete("/episodes/{episode_id}")
+async def delete_episode(
+    request: Request,
+    episode_id: str,
+    principal: Annotated[Principal, Depends(require_principal)],
+):
+    """Delete a draft or episode owned by the creator."""
+    repo = _repo(request)
+    episode = await repo.get_episode(episode_id)
+    if episode is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="episode not found")
+    if episode["creator_id"] != principal.subject:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your episode")
+
+    await repo.delete_episode(episode_id)
+    return {"deleted": True, "episode_id": episode_id}
 
 
 @router.post("/episodes/{episode_id}/publish", response_model=EpisodeResponse)
@@ -238,15 +302,3 @@ async def get_creator_timeseries(
     repo = _repo(request)
     data = await repo.get_creator_timeseries(principal.subject, days=days)
     return data
-
-
-@router.get("/episodes/me")
-async def get_my_episodes(
-    request: Request,
-    principal: Annotated[Principal, Depends(require_principal)],
-    status: str | None = None,
-):
-    """Get episodes by the authenticated creator (optionally filtered by status)."""
-    repo = _repo(request)
-    episodes = await repo.get_creator_episodes(principal.subject, status=status)
-    return {"episodes": episodes}

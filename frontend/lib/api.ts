@@ -246,8 +246,26 @@ export const api = {
   getCreatorTimeseries: (days: number = 30) =>
     request<TimeseriesResponse>(`/v1/analytics/creator/timeseries?days=${days}`, {}, true),
 
-  getMyEpisodes: () =>
-    request<{ episodes: EpisodeResponse[] }>("/v1/episodes/me", {}, true),
+  getMyEpisodes: (status?: string) =>
+    request<{ episodes: EpisodeResponse[] }>(
+      status ? `/v1/episodes/me?status=${encodeURIComponent(status)}` : "/v1/episodes/me",
+      {},
+      true,
+    ),
+
+  updateEpisode: (
+    episodeId: string,
+    data: { title?: string; description?: string; category?: string },
+  ) =>
+    request<EpisodeResponse>(`/v1/episodes/${episodeId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }, true),
+
+  deleteEpisode: (episodeId: string) =>
+    request<{ deleted: boolean; episode_id: string }>(`/v1/episodes/${episodeId}`, {
+      method: "DELETE",
+    }, true),
 
   forgotPassword: (email: string) =>
     request<{ message: string; email_sent: boolean }>("/v1/auth/forgot-password", {

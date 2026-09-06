@@ -17,6 +17,10 @@ import {
   ShieldCheck,
   Loader2,
   Mic2,
+  Share2,
+  Check,
+  Calendar,
+  Radio,
 } from "lucide-react";
 
 function formatDuration(seconds: number): string {
@@ -38,7 +42,16 @@ function NowPlayingContent() {
   const [episode, setEpisode] = useState<EpisodeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [quota, setQuota] = useState<{ total_duration_seconds: number } | null>(null);
+  const [copied, setCopied] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleShare = () => {
+    if (typeof window !== "undefined") {
+      navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }
+  };
 
   const {
     episode: activeEpisode,
@@ -294,22 +307,59 @@ function NowPlayingContent() {
             </div>
           </div>
 
-          <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-6 shadow-sm flex-1">
-            <h3 className="font-headline-md text-headline-md text-on-surface mb-4">Details</h3>
-            <ul className="space-y-4">
-              <li className="flex gap-4">
-                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Episode ID</span>
-                <div>
-                  <p className="font-body-md text-body-md text-on-surface">{episode.episode_id}</p>
-                </div>
+          <div className="bg-surface-container-lowest rounded-xl border border-outline-variant p-6 shadow-sm flex-1 space-y-4">
+            <h3 className="font-headline-md text-headline-md text-on-surface">Details</h3>
+            <ul className="space-y-3.5">
+              <li className="flex items-center justify-between text-xs">
+                <span className="font-label-sm text-label-sm text-on-surface-variant flex items-center gap-1.5">
+                  <Calendar className="w-3.5 h-3.5" />
+                  Published
+                </span>
+                <span className="font-body-md text-body-md text-on-surface font-medium">
+                  {new Date(episode.created_at * 1000).toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
               </li>
-              <li className="flex gap-4">
-                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Category</span>
-                <div>
-                  <p className="font-body-md text-body-md text-on-surface">{episode.category}</p>
-                </div>
+              <li className="flex items-center justify-between text-xs">
+                <span className="font-label-sm text-label-sm text-on-surface-variant flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5" />
+                  Audio Master
+                </span>
+                <span className="font-body-md text-body-md text-primary font-medium flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" />
+                  48 kHz Studio Mastered
+                </span>
+              </li>
+              <li className="flex items-center justify-between text-xs">
+                <span className="font-label-sm text-label-sm text-on-surface-variant flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Protection
+                </span>
+                <span className="font-body-md text-body-md text-on-surface font-medium">
+                  Forensically Watermarked
+                </span>
               </li>
             </ul>
+
+            <button
+              onClick={handleShare}
+              className="w-full mt-4 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg bg-surface-container-high hover:bg-surface-variant text-on-surface font-caption text-caption font-bold transition-all active:scale-[0.99] border border-outline-variant/60"
+            >
+              {copied ? (
+                <>
+                  <Check className="w-4 h-4 text-primary" />
+                  <span>Link Copied to Clipboard!</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-4 h-4" />
+                  <span>Share Episode Link</span>
+                </>
+              )}
+            </button>
           </div>
           <p className="font-caption text-caption text-on-surface-variant/70 text-center flex items-center justify-center gap-2">
             <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />

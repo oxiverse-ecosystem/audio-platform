@@ -381,6 +381,40 @@ class Repository:
             self._db().execute("UPDATE episodes SET publish_on_ready=? WHERE episode_id=?", (publish_on_ready, episode_id))
             self._db().commit()
 
+    async def update_episode_metadata(
+        self,
+        episode_id: str,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        category: str | None = None,
+    ) -> None:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if title is not None:
+            clauses.append("title=?")
+            params.append(title.strip())
+        if description is not None:
+            clauses.append("description=?")
+            params.append(description.strip() if description else None)
+        if category is not None:
+            clauses.append("category=?")
+            params.append(category.strip())
+        if not clauses:
+            return
+        sql = f"UPDATE episodes SET {', '.join(clauses)} WHERE episode_id=?"
+        params.append(episode_id)
+        async with self._lock:
+            self._db().execute(sql, tuple(params))
+            self._db().commit()
+
+    async def delete_episode(self, episode_id: str) -> None:
+        async with self._lock:
+            db = self._db()
+            db.execute("DELETE FROM episode_plays WHERE episode_id=?", (episode_id,))
+            db.execute("DELETE FROM episodes WHERE episode_id=?", (episode_id,))
+            db.commit()
+
     async def get_episodes(self, *, category: str | None = None, creator_id: str | None = None,
                            search: str | None = None, visibility: str = "public",
                            status: str | None = "published",

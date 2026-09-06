@@ -155,6 +155,44 @@ def test_episodes_create_list_search():
             assert r.status_code == 200
             assert r.json()["title"] == "AI Signals in Tech"
 
+            # get my episodes (/episodes/me) must not route to {episode_id}="me"
+            r = client.get("/v1/episodes/me", headers=headers)
+            assert r.status_code == 200, r.text
+            my_eps = r.json()["episodes"]
+            assert len(my_eps) == 3
+
+            # get my episodes with status filter
+            r = client.get("/v1/episodes/me?status=published", headers=headers)
+            assert r.status_code == 200
+            assert len(r.json()["episodes"]) == 3
+
+            # update episode metadata (edit draft / episode)
+            r = client.patch(f"/v1/episodes/{ep1['episode_id']}", headers=headers, json={
+                "title": "AI Signals in Tech (Edited)",
+                "category": "Tech & AI",
+                "description": "Updated deep dive on AI signals.",
+            })
+            assert r.status_code == 200, r.text
+            updated_ep = r.json()
+            assert updated_ep["title"] == "AI Signals in Tech (Edited)"
+            assert updated_ep["category"] == "Tech & AI"
+            assert updated_ep["description"] == "Updated deep dive on AI signals."
+
+            # non-owner cannot update
+            r = client.patch(f"/v1/episodes/{ep1['episode_id']}", headers={"Authorization": f"Bearer {other}"}, json={
+                "title": "Hacked Title",
+            })
+            assert r.status_code == 403
+
+            # delete episode
+            r = client.delete(f"/v1/episodes/{ep1['episode_id']}", headers=headers)
+            assert r.status_code == 200, r.text
+            assert r.json()["deleted"] is True
+
+            # confirm it is gone
+            r = client.get(f"/v1/episodes/{ep1['episode_id']}")
+            assert r.status_code == 404
+
             # not found
             r = client.get("/v1/episodes/nonexistent")
             assert r.status_code == 404
