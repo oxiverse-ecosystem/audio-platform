@@ -42,33 +42,7 @@ def _public_base_url() -> str:
 
 
 
-def _send_verify_email(email: str, verify_url: str, subject: str = "Verify your Oxiverse Audio email") -> bool:
-    """Send the verification email via Resend. Returns True if sent, False if not configured (dev fallback)."""
-    # Read env lazily so this works regardless of import order (config.load_dotenv may not have run yet).
-    api_key = os.getenv("RESEND_API_KEY") or ""
-    resend_from = os.getenv("RESEND_FROM") or "onboarding@resend.dev"
-    if not api_key or api_key == "REPLACE_WITH_YOUR_RESEND_KEY":
-        return False
-    try:
-        import resend
-
-        resend.api_key = api_key
-        resend.Emails.send({
-            "from": resend_from,
-            "to": [email],
-            "subject": subject,
-            "html": (
-                "<p>Welcome to Oxiverse Audio.</p>"
-                f"<p>Confirm your email to start listening and publishing:</p>"
-                f'<p><a href="{verify_url}" style="background:#4648d4;color:#fff;padding:10px 18px;'
-                'border-radius:8px;text-decoration:none;display:inline-block;">Verify email</a></p>'
-                f'<p>Or paste this link: {verify_url}</p>'
-                "<p>This link expires in 24 hours.</p>"
-            ),
-        })
-        return True
-    except Exception:
-        return False
+from .email import send_password_reset_email, send_verification_email
 
 
 # --- password hashing (stdlib) ---
@@ -97,14 +71,6 @@ def _auth_secret(request: Request) -> bytes:
     return request.app.state.settings.auth_secret
 
 
-def _write_dev_email(settings, email: str, url: str) -> None:
-    try:
-        log_path = settings.data_dir / "dev-emails.log"
-        settings.data_dir.mkdir(parents=True, exist_ok=True)
-        with open(log_path, "a", encoding="utf-8") as fh:
-            fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} VERIFY {email} -> {url}\n")
-    except OSError:
-        pass
 
 
 async def require_auth(
@@ -160,16 +126,14 @@ async def signup(request: Request, body: SignupRequest):
     token = secrets.token_hex(32)
     await repo.create_verification(token, user_id, now, now + VERIFY_TTL_SECONDS)
     verify_url = f"{_public_base_url()}/verify-email?token={token}"
-    emailed = _send_verify_email(email, verify_url)
-    if not emailed:
-        _write_dev_email(request.app.state.settings, email, verify_url)
+    emailed = send_verification_email(email, body.display_name.strip(), verify_url)
 
     return {
         "user_id": user_id,
         "email": email,
         "email_verified": False,
         "email_sent": emailed,
-        "dev_note": None if emailed else "Resend not configured; verify via runtime-data/dev-emails.log or the returned URL",
+        "dev_note": None if emailed else "Transactional email provider not configured; link logged to dev log",
         "verify_url": verify_url,
         "verify_token": token,
     }
@@ -214,9 +178,7 @@ async def login(request: Request, body: LoginRequest):
         token = secrets.token_hex(32)
         await repo.create_verification(token, user["user_id"], now, now + VERIFY_TTL_SECONDS)
         verify_url = f"{_public_base_url()}/verify-email?token={token}"
-        emailed = _send_verify_email(email, verify_url)
-        if not emailed:
-            _write_dev_email(request.app.state.settings, email, verify_url)
+        emailed = send_verification_email(email, user["display_name"], verify_url)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="email not verified" + ("" if emailed else "; verification link re-issued (see email or dev log)"),
@@ -277,17 +239,7 @@ async def forgot_password(request: Request, body: ForgotPasswordRequest):
     await repo.create_password_reset(token, user["user_id"], now, now + PASSWORD_RESET_TTL)
     reset_url = f"{_public_base_url()}/reset-password?token={token}"
 
-    # Send via Resend (same pattern as verify email)
-    emailed = _send_verify_email(email, reset_url, subject="Reset your Oxiverse Audio password")
-    if not emailed:
-        # dev fallback
-        try:
-            log_path = request.app.state.settings.data_dir / "dev-emails.log"
-            request.app.state.settings.data_dir.mkdir(parents=True, exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as fh:
-                fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} RESET {email} -> {reset_url}\n")
-        except OSError:
-            pass
+    emailed = send_password_reset_email(email, reset_url)
 
     return {"message": "If that email is registered, a reset link has been sent.", "email_sent": emailed}
 

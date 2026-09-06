@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at INTEGER NOT NULL,
     asset_id TEXT,
     raw_path TEXT,
+    raw_key_mp3 TEXT,
     mastered_key_wav TEXT,
     mastered_key_mp3 TEXT,
     report_json TEXT,
@@ -58,6 +59,7 @@ class JobRecord:
     updated_at: int
     asset_id: str | None
     raw_path: str | None
+    raw_key_mp3: str | None
     mastered_key_wav: str | None
     mastered_key_mp3: str | None
     report: dict[str, Any] | None
@@ -75,6 +77,10 @@ class JobsRepository:
             conn = sqlite3.connect(self._path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
             conn.executescript(SCHEMA)
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN raw_key_mp3 TEXT")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
             conn.close()
 
@@ -108,13 +114,14 @@ class JobsRepository:
 
     async def update_status(
         self, job_id: str, status: str, *, mastered_key_wav: str | None = None,
-        mastered_key_mp3: str | None = None, report: dict | None = None, error: str | None = None,
+        mastered_key_mp3: str | None = None, raw_key_mp3: str | None = None,
+        report: dict | None = None, error: str | None = None,
     ) -> None:
         now = int(time.time())
         await self._execute(
             """UPDATE jobs SET status=?, updated_at=?, mastered_key_wav=?, mastered_key_mp3=?,
-                  report_json=?, error=? WHERE job_id=?""",
-            (status, now, mastered_key_wav, mastered_key_mp3,
+                  raw_key_mp3=?, report_json=?, error=? WHERE job_id=?""",
+            (status, now, mastered_key_wav, mastered_key_mp3, raw_key_mp3,
              json.dumps(report, sort_keys=True) if report is not None else None, error, job_id),
         )
 
@@ -147,10 +154,13 @@ class JobsRepository:
     @staticmethod
     def _record_from_row(row: sqlite3.Row) -> JobRecord:
         report = json.loads(row["report_json"]) if row["report_json"] else None
+        keys = row.keys()
+        raw_key_mp3 = row["raw_key_mp3"] if "raw_key_mp3" in keys else None
         return JobRecord(
             job_id=row["job_id"], owner_user_id=row["owner_user_id"], creator_id=row["creator_id"],
             title=row["title"], status=row["status"], created_at=row["created_at"],
             updated_at=row["updated_at"], asset_id=row["asset_id"], raw_path=row["raw_path"],
-            mastered_key_wav=row["mastered_key_wav"], mastered_key_mp3=row["mastered_key_mp3"],
+            raw_key_mp3=raw_key_mp3, mastered_key_wav=row["mastered_key_wav"],
+            mastered_key_mp3=row["mastered_key_mp3"],
             report=report, error=row["error"],
         )

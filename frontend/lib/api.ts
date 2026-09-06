@@ -43,6 +43,7 @@ export interface UploadResponse {
   asset_id: string;
   status: string;
   status_url: string;
+  episode_id?: string | null;
 }
 
 export interface JobStatusResponse {
@@ -52,9 +53,21 @@ export interface JobStatusResponse {
   status: string;
   created_at: number;
   updated_at: number;
-  report: Record<string, unknown> | null;
+  report: {
+    sample_rate?: number;
+    duration_seconds?: number;
+    waveform_peaks?: number[];
+    repair?: Record<string, unknown>;
+    enhance?: Record<string, unknown>;
+    [key: string]: unknown;
+  } | null;
   error: string | null;
-  download: Record<string, string> | null;
+  download: {
+    mp3?: string;
+    wav?: string;
+    raw?: string;
+    [key: string]: string | undefined;
+  } | null;
 }
 
 export interface EpisodeResponse {
@@ -65,9 +78,29 @@ export interface EpisodeResponse {
   description: string | null;
   category: string;
   visibility: string;
+  status: "draft" | "processing" | "ready" | "published";
+  publish_on_ready?: number;
   duration_seconds: number;
   play_count: number;
+  waveform_peaks?: number[] | null;
   created_at: number;
+}
+
+export interface TimeseriesPoint {
+  date: string;
+  timestamp: number;
+  plays: number;
+  completed_plays: number;
+  completion_rate: number;
+  avg_duration_seconds: number;
+}
+
+export interface TimeseriesResponse {
+  days: number;
+  total_plays: number;
+  overall_retention_rate: number;
+  avg_listen_seconds: number;
+  points: TimeseriesPoint[];
 }
 
 class ApiError extends Error {
@@ -131,11 +164,20 @@ export const api = {
 
   me: () => request<ApiUser>("/v1/auth/me", {}, true),
 
-  upload: (file: File, title: string, outputFormat: string, onProgress?: (pct: number) => void) => {
+  upload: (
+    file: File,
+    title: string,
+    outputFormat: string,
+    options?: { description?: string; category?: string; publish_immediate?: boolean },
+    onProgress?: (pct: number) => void
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
     formData.append("title", title);
     formData.append("output_format", outputFormat);
+    if (options?.description) formData.append("description", options.description);
+    if (options?.category) formData.append("category", options.category);
+    if (options?.publish_immediate) formData.append("publish_immediate", "true");
 
     return new Promise<UploadResponse>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
@@ -173,16 +215,36 @@ export const api = {
   getEpisode: (episodeId: string) =>
     request<EpisodeResponse>(`/v1/episodes/${episodeId}`),
 
+  getDrafts: () =>
+    request<{ drafts: EpisodeResponse[] }>("/v1/episodes/drafts", {}, true),
+
+  publishDraft: (episodeId: string) =>
+    request<EpisodeResponse>(`/v1/episodes/${episodeId}/publish`, {
+      method: "POST",
+    }, true),
+
   createEpisode: (data: { asset_id: string; title: string; description?: string; category?: string }) =>
     request<EpisodeResponse>("/v1/episodes", {
       method: "POST",
       body: JSON.stringify(data),
     }, true),
 
+  recordPlay: (episodeId: string, data: { duration_listened_seconds?: number; completed?: boolean } = {}) =>
+    request<{ status: string; play_count: number }>(`/v1/episodes/${episodeId}/play`, {
+      method: "POST",
+      body: JSON.stringify({
+        duration_listened_seconds: data.duration_listened_seconds ?? 0,
+        completed: Boolean(data.completed),
+      }),
+    }),
+
   getMyAnalytics: () =>
     request<{ total_episodes: number; total_plays: number; total_duration_seconds: number; total_earnings: number; pack_subscribers: number }>(
       "/v1/analytics/me", {}, true,
     ),
+
+  getCreatorTimeseries: (days: number = 30) =>
+    request<TimeseriesResponse>(`/v1/analytics/creator/timeseries?days=${days}`, {}, true),
 
   getMyEpisodes: () =>
     request<{ episodes: EpisodeResponse[] }>("/v1/episodes/me", {}, true),

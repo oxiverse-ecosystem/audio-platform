@@ -106,6 +106,9 @@ CREATE TABLE IF NOT EXISTS episodes (
     description TEXT,
     category TEXT NOT NULL DEFAULT 'Founder Stories',
     visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','pack','private')),
+    status TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','processing','ready','published')),
+    publish_on_ready INTEGER NOT NULL DEFAULT 0,
+    waveform_peaks TEXT,
     duration_seconds REAL NOT NULL DEFAULT 0,
     play_count INTEGER NOT NULL DEFAULT 0,
     created_at INTEGER NOT NULL
@@ -113,6 +116,17 @@ CREATE TABLE IF NOT EXISTS episodes (
 CREATE INDEX IF NOT EXISTS episodes_created ON episodes(created_at DESC);
 CREATE INDEX IF NOT EXISTS episodes_category ON episodes(category, created_at DESC);
 CREATE INDEX IF NOT EXISTS episodes_creator ON episodes(creator_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS episodes_status ON episodes(status, created_at DESC);
+CREATE TABLE IF NOT EXISTS episode_plays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode_id TEXT NOT NULL REFERENCES episodes(episode_id) ON DELETE CASCADE,
+    creator_id TEXT NOT NULL REFERENCES users(user_id),
+    played_at INTEGER NOT NULL,
+    duration_listened_seconds REAL NOT NULL DEFAULT 0,
+    completed INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS episode_plays_creator_date ON episode_plays(creator_id, played_at);
+CREATE INDEX IF NOT EXISTS episode_plays_episode ON episode_plays(episode_id, played_at);
 """
 
 
@@ -130,6 +144,16 @@ class Repository:
             self._connection = sqlite3.connect(self._path, check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
             self._connection.executescript(SCHEMA)
+            # Automatic schema migration for existing sqlite db files
+            for col, spec in [
+                ("status", "TEXT NOT NULL DEFAULT 'published' CHECK(status IN ('draft','processing','ready','published'))"),
+                ("publish_on_ready", "INTEGER NOT NULL DEFAULT 0"),
+                ("waveform_peaks", "TEXT"),
+            ]:
+                try:
+                    self._connection.execute(f"ALTER TABLE episodes ADD COLUMN {col} {spec}")
+                except sqlite3.OperationalError:
+                    pass
             self._connection.commit()
 
     async def close(self) -> None:
@@ -302,24 +326,69 @@ class Repository:
             self._db().execute("UPDATE email_verifications SET used_at=? WHERE token=?", (now, token))
             self._db().commit()
 
-    # --- episodes (discovery) ---
+    # --- episodes (discovery, drafts & async) ---
+    @staticmethod
+    def _episode_from_row(row: sqlite3.Row | dict) -> dict[str, Any]:
+        d = dict(row)
+        if "waveform_peaks" in d and isinstance(d["waveform_peaks"], str):
+            try:
+                d["waveform_peaks"] = json.loads(d["waveform_peaks"])
+            except Exception:
+                d["waveform_peaks"] = None
+        elif "waveform_peaks" not in d:
+            d["waveform_peaks"] = None
+        if "status" not in d:
+            d["status"] = "published"
+        if "publish_on_ready" not in d:
+            d["publish_on_ready"] = 0
+        return d
+
     async def create_episode(
         self, episode_id: str, asset_id: str, creator_id: str, title: str,
         description: str | None, category: str, visibility: str, duration_seconds: float, now: int,
+        status: str = "published", publish_on_ready: int = 0, waveform_peaks: list[float] | None = None,
     ) -> None:
+        peaks_json = json.dumps(waveform_peaks) if waveform_peaks is not None else None
         async with self._lock:
             self._db().execute(
-                """INSERT INTO episodes(episode_id,asset_id,creator_id,title,description,category,visibility,duration_seconds,play_count,created_at)
-                   VALUES(?,?,?,?,?,?,?,?,0,?)""",
-                (episode_id, asset_id, creator_id, title, description, category, visibility, duration_seconds, now),
+                """INSERT INTO episodes(episode_id,asset_id,creator_id,title,description,category,visibility,duration_seconds,play_count,created_at,status,publish_on_ready,waveform_peaks)
+                   VALUES(?,?,?,?,?,?,?,?,0,?,?,?,?)""",
+                (episode_id, asset_id, creator_id, title, description, category, visibility, duration_seconds, now, status, publish_on_ready, peaks_json),
             )
+            self._db().commit()
+
+    async def update_episode_status(
+        self, episode_id: str, status: str, *,
+        duration_seconds: float | None = None, waveform_peaks: list[float] | None = None,
+    ) -> None:
+        sql = "UPDATE episodes SET status=?"
+        params: list[Any] = [status]
+        if duration_seconds is not None:
+            sql += ", duration_seconds=?"
+            params.append(duration_seconds)
+        if waveform_peaks is not None:
+            sql += ", waveform_peaks=?"
+            params.append(json.dumps(waveform_peaks))
+        sql += " WHERE episode_id=?"
+        params.append(episode_id)
+        async with self._lock:
+            self._db().execute(sql, tuple(params))
+            self._db().commit()
+
+    async def update_episode_publish_on_ready(self, episode_id: str, publish_on_ready: int) -> None:
+        async with self._lock:
+            self._db().execute("UPDATE episodes SET publish_on_ready=? WHERE episode_id=?", (publish_on_ready, episode_id))
             self._db().commit()
 
     async def get_episodes(self, *, category: str | None = None, creator_id: str | None = None,
                            search: str | None = None, visibility: str = "public",
+                           status: str | None = "published",
                            limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         sql = "SELECT * FROM episodes WHERE visibility=?"
         params: list = [visibility]
+        if status:
+            sql += " AND status=?"
+            params.append(status)
         if category:
             sql += " AND category=?"
             params.append(category)
@@ -333,22 +402,43 @@ class Repository:
         params.extend((limit, offset))
         async with self._lock:
             rows = self._db().execute(sql, tuple(params)).fetchall()
-        return [dict(r) for r in rows]
+        return [self._episode_from_row(r) for r in rows]
 
     async def get_episode(self, episode_id: str) -> dict[str, Any] | None:
         async with self._lock:
             row = self._db().execute("SELECT * FROM episodes WHERE episode_id=?", (episode_id,)).fetchone()
-        return dict(row) if row else None
+        return self._episode_from_row(row) if row else None
+
+    async def get_episode_by_asset(self, asset_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            row = self._db().execute(
+                "SELECT * FROM episodes WHERE asset_id=? ORDER BY created_at DESC LIMIT 1", (asset_id,)
+            ).fetchone()
+        return self._episode_from_row(row) if row else None
 
     async def increment_play_count(self, episode_id: str) -> None:
         async with self._lock:
             self._db().execute("UPDATE episodes SET play_count=play_count+1 WHERE episode_id=?", (episode_id,))
             self._db().commit()
 
+    async def record_play(
+        self, episode_id: str, creator_id: str, played_at: int,
+        duration_listened_seconds: float = 0, completed: bool = False,
+    ) -> None:
+        async with self._lock:
+            db = self._db()
+            db.execute(
+                """INSERT INTO episode_plays(episode_id,creator_id,played_at,duration_listened_seconds,completed)
+                   VALUES(?,?,?,?,?)""",
+                (episode_id, creator_id, played_at, duration_listened_seconds, int(bool(completed))),
+            )
+            db.execute("UPDATE episodes SET play_count=play_count+1 WHERE episode_id=?", (episode_id,))
+            db.commit()
+
     async def get_categories(self, visibility: str = "public") -> list[str]:
         async with self._lock:
             rows = self._db().execute(
-                "SELECT DISTINCT category FROM episodes WHERE visibility=? ORDER BY category", (visibility,)
+                "SELECT DISTINCT category FROM episodes WHERE visibility=? AND status='published' ORDER BY category", (visibility,)
             ).fetchall()
         return [r["category"] for r in rows]
 
@@ -356,13 +446,12 @@ class Repository:
     async def get_creator_stats(self, creator_id: str) -> dict[str, Any]:
         async with self._lock:
             db = self._db()
-            episodes = db.execute("SELECT episode_id, play_count FROM episodes WHERE creator_id=?", (creator_id,)).fetchall()
+            episodes = db.execute("SELECT episode_id, play_count FROM episodes WHERE creator_id=? AND status='published'", (creator_id,)).fetchall()
             total_episodes = len(episodes)
             total_plays = sum(r["play_count"] for r in episodes)
             total_seconds = db.execute(
                 "SELECT COALESCE(SUM(duration_seconds), 0) AS s FROM episodes WHERE creator_id=?", (creator_id,)
             ).fetchone()["s"]
-            # Mock earnings/subscribers for now (no payment system yet)
             return {
                 "total_episodes": total_episodes,
                 "total_plays": total_plays,
@@ -371,13 +460,96 @@ class Repository:
                 "pack_subscribers": 0,
             }
 
-    async def get_creator_episodes(self, creator_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+    async def get_creator_episodes(self, creator_id: str, status: str | None = None, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM episodes WHERE creator_id=?"
+        params: list = [creator_id]
+        if status:
+            sql += " AND status=?"
+            params.append(status)
+        sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend((limit, offset))
+        async with self._lock:
+            rows = self._db().execute(sql, tuple(params)).fetchall()
+        return [self._episode_from_row(r) for r in rows]
+
+    async def get_creator_drafts(self, creator_id: str, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         async with self._lock:
             rows = self._db().execute(
-                "SELECT * FROM episodes WHERE creator_id=? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                "SELECT * FROM episodes WHERE creator_id=? AND status != 'published' ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (creator_id, limit, offset),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._episode_from_row(r) for r in rows]
+
+    async def get_creator_timeseries(self, creator_id: str, days: int = 30) -> dict[str, Any]:
+        """Aggregate daily plays and listener retention over the specified time window."""
+        now = int(time.time())
+        day_seconds = 86400
+        start_of_today = (now // day_seconds) * day_seconds
+        start_ts = start_of_today - (days - 1) * day_seconds
+
+        async with self._lock:
+            db = self._db()
+            rows = db.execute(
+                """SELECT played_at, duration_listened_seconds, completed
+                   FROM episode_plays
+                   WHERE creator_id=? AND played_at >= ?
+                   ORDER BY played_at ASC""",
+                (creator_id, start_ts),
+            ).fetchall()
+
+        daily_counts: dict[int, dict[str, Any]] = {}
+        for d in range(days):
+            day_ts = start_ts + d * day_seconds
+            date_str = time.strftime("%Y-%m-%d", time.gmtime(day_ts))
+            daily_counts[day_ts] = {
+                "date": date_str,
+                "timestamp": day_ts,
+                "plays": 0,
+                "completed_plays": 0,
+                "total_duration": 0.0,
+            }
+
+        total_plays = 0
+        total_completed = 0
+        total_duration_all = 0.0
+
+        for r in rows:
+            p_ts = r["played_at"]
+            day_bucket = (p_ts // day_seconds) * day_seconds
+            if day_bucket in daily_counts:
+                daily_counts[day_bucket]["plays"] += 1
+                if r["completed"]:
+                    daily_counts[day_bucket]["completed_plays"] += 1
+                daily_counts[day_bucket]["total_duration"] += r["duration_listened_seconds"]
+            total_plays += 1
+            if r["completed"]:
+                total_completed += 1
+            total_duration_all += r["duration_listened_seconds"]
+
+        points = []
+        for day_ts in sorted(daily_counts.keys()):
+            item = daily_counts[day_ts]
+            p = item["plays"]
+            comp = item["completed_plays"]
+            points.append({
+                "date": item["date"],
+                "timestamp": item["timestamp"],
+                "plays": p,
+                "completed_plays": comp,
+                "completion_rate": round((comp / p) * 100, 1) if p > 0 else 0.0,
+                "avg_duration_seconds": round(item["total_duration"] / p, 1) if p > 0 else 0.0,
+            })
+
+        overall_retention = round((total_completed / total_plays) * 100, 1) if total_plays > 0 else 0.0
+        avg_listen = round(total_duration_all / total_plays, 1) if total_plays > 0 else 0.0
+
+        return {
+            "days": days,
+            "total_plays": total_plays,
+            "overall_retention_rate": overall_retention,
+            "avg_listen_seconds": avg_listen,
+            "points": points,
+        }
 
     # --- password resets ---
     async def create_password_reset(self, token: str, user_id: str, created_at: int, expires_at: int) -> None:

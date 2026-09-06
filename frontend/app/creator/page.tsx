@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, EpisodeResponse, TimeseriesResponse, TimeseriesPoint } from "@/lib/api";
 import {
   Headphones,
   User,
@@ -13,6 +13,13 @@ import {
   TrendingUp,
   Landmark,
   Loader2,
+  FileAudio,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  Play,
+  ArrowUpRight,
+  Plus,
 } from "lucide-react";
 
 interface Analytics {
@@ -37,19 +44,73 @@ function formatHours(seconds: number): string {
 export default function CreatorDashboardPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+
   const [stats, setStats] = useState<Analytics | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Time-series state
+  const [timeframe, setTimeframe] = useState<number>(30);
+  const [timeseries, setTimeseries] = useState<TimeseriesResponse | null>(null);
+  const [loadingTimeseries, setLoadingTimeseries] = useState(false);
+  const [hoveredPoint, setHoveredPoint] = useState<TimeseriesPoint | null>(null);
+
+  // Drafts and creator episodes state
+  const [drafts, setDrafts] = useState<EpisodeResponse[]>([]);
+  const [myEpisodes, setMyEpisodes] = useState<EpisodeResponse[]>([]);
+  const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.push("/login");
   }, [user, loading, router]);
 
+  // Load summary stats
   useEffect(() => {
     if (!user) return;
     api.getMyAnalytics()
       .then(setStats)
       .catch((e) => setError(e instanceof ApiError ? e.message : "Failed to load analytics"));
   }, [user]);
+
+  // Load time-series analytics
+  useEffect(() => {
+    if (!user) return;
+    setLoadingTimeseries(true);
+    api.getCreatorTimeseries(timeframe)
+      .then(setTimeseries)
+      .catch(() => setTimeseries(null))
+      .finally(() => setLoadingTimeseries(false));
+  }, [user, timeframe]);
+
+  // Load drafts and creator's episodes
+  const refreshEpisodesAndDrafts = () => {
+    if (!user) return;
+    api.getDrafts()
+      .then((d) => setDrafts(d.drafts || []))
+      .catch(() => setDrafts([]));
+
+    api.getMyEpisodes()
+      .then((d) => setMyEpisodes(d.episodes || []))
+      .catch(() => setMyEpisodes([]));
+  };
+
+  useEffect(() => {
+    refreshEpisodesAndDrafts();
+  }, [user]);
+
+  const handlePublishDraft = async (draftId: string) => {
+    setPublishingDraftId(draftId);
+    try {
+      await api.publishDraft(draftId);
+      refreshEpisodesAndDrafts();
+      if (stats) {
+        api.getMyAnalytics().then(setStats).catch(() => {});
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Failed to publish draft");
+    } finally {
+      setPublishingDraftId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -64,7 +125,7 @@ export default function CreatorDashboardPage() {
       <div className="flex min-h-screen bg-surface items-center justify-center p-margin-mobile">
         <div className="text-center">
           <h1 className="font-headline-md text-headline-md text-on-surface mb-2">Sign in required</h1>
-          <p className="font-body-md text-body-md text-on-surface-variant">Log in to view your analytics.</p>
+          <p className="font-body-md text-body-md text-on-surface-variant">Log in to view your creator studio.</p>
         </div>
       </div>
     );
@@ -76,27 +137,58 @@ export default function CreatorDashboardPage() {
     ? [
         { label: "Total Episodes", value: formatNumber(stats.total_episodes), delta: "Published", icon: Headphones, up: true },
         { label: "Total Plays", value: formatNumber(stats.total_plays), delta: "All time", icon: User, up: true },
-        { label: "Total Hours", value: `${Math.round(stats.total_duration_seconds / 3600)}h`, delta: "Content", icon: Clock, up: true },
+        { label: "Retention Rate", value: timeseries ? `${timeseries.overall_retention_rate}%` : "100%", delta: "Completion", icon: TrendingUp, up: true },
         { label: "Quota Left", value: formatHours(Math.max(0, MONTHLY_QUOTA_SECONDS - stats.total_duration_seconds)), delta: "Free tier this month", icon: Landmark, up: true },
       ]
     : [];
+
+  // SVG Chart Geometry
+  const points = timeseries?.points || [];
+  const maxPlays = Math.max(5, ...points.map((p) => p.plays));
+  const chartHeight = 180;
+  const chartWidth = 700;
+  const paddingX = 20;
+  const paddingY = 20;
+  const innerW = chartWidth - paddingX * 2;
+  const innerH = chartHeight - paddingY * 2;
+
+  const polylineCoords = points.map((p, idx) => {
+    const x = paddingX + (points.length > 1 ? (idx / (points.length - 1)) * innerW : innerW / 2);
+    const y = paddingY + innerH - (p.plays / maxPlays) * innerH;
+    return { x, y, point: p };
+  });
+
+  const pathD = polylineCoords.length > 0
+    ? `M ${polylineCoords[0].x} ${polylineCoords[0].y} ` +
+      polylineCoords.slice(1).map((c) => `L ${c.x} ${c.y}`).join(" ")
+    : "";
+
+  const areaD = polylineCoords.length > 0
+    ? `${pathD} L ${polylineCoords[polylineCoords.length - 1].x} ${chartHeight - paddingY} L ${polylineCoords[0].x} ${chartHeight - paddingY} Z`
+    : "";
 
   return (
     <div className="flex min-h-screen bg-surface">
       <Sidebar />
       <main className="flex-1 min-w-0 overflow-x-hidden overflow-y-auto md:pl-sidebar pt-14 md:pt-0 pb-24">
         <div className="max-w-container-max mx-auto p-margin-mobile md:p-margin-desktop space-y-stack-lg">
-          <header className="flex justify-between items-end pb-stack-md border-b border-outline-variant/50">
+          <header className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-stack-md border-b border-outline-variant/50">
             <div>
-              <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-2">
+              <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-1">
                 Creator Studio
               </h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">Your studio overview, monthly usage, and growth.</p>
+              <p className="font-body-md text-body-md text-on-surface-variant">
+                Time-series listening analytics, voice drop drafts, and studio mastering.
+              </p>
             </div>
-            <div className="hidden sm:block">
-              <span className="bg-secondary-fixed text-on-secondary-fixed px-3 py-1 rounded-full font-label-sm text-label-sm uppercase">
-                {user.is_creator ? "Creator" : "Listener"}
-              </span>
+            <div className="flex items-center gap-3">
+              <Link
+                href="/new-drop"
+                className="bg-primary text-on-primary font-caption text-caption px-4 py-2.5 rounded-lg font-bold hover:bg-on-primary-fixed-variant transition-colors flex items-center gap-2 shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                New Voice Drop
+              </Link>
             </div>
           </header>
 
@@ -123,69 +215,319 @@ export default function CreatorDashboardPage() {
             ))}
           </div>
 
-          {/* Chart placeholder */}
+          {/* Time-Series Creator Analytics Chart */}
           <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-headline-md text-headline-md text-on-surface">Listens Over Time</h3>
-              <select className="bg-surface-container-low border-outline-variant/50 text-on-surface text-sm rounded-md py-1 px-3 focus:border-primary focus:ring-primary font-caption">
-                <option>Last 7 Days</option>
-                <option>Last 30 Days</option>
-                <option>All Time</option>
-              </select>
-            </div>
-            <div className="h-64 flex items-center justify-center text-on-surface-variant font-body-md">
-              {stats && stats.total_plays > 0
-                ? `Chart data: ${stats.total_plays} total plays across ${stats.total_episodes} episodes`
-                : "No listening data yet. Publish episodes to see analytics."}
-            </div>
-          </div>
-
-          {/* Bottom: payout + quota */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-gutter pb-stack-lg">
-            <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm flex flex-col justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
               <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <Landmark className="text-outline w-5 h-5" strokeWidth={1.5} />
-                  <h3 className="font-caption text-caption text-on-surface-variant uppercase tracking-wide">Next Payout</h3>
-                </div>
-                <div className="font-display-lg text-display-lg text-on-surface">
-                  ${stats ? stats.total_earnings.toFixed(2) : "0.00"}
-                </div>
-                <p className="font-body-md text-body-md text-on-surface-variant mt-1">
-                  {stats && stats.total_earnings > 0 ? "Processing" : "No earnings yet"}
+                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-2">
+                  <TrendingUp className="w-5 h-5 text-primary" />
+                  Listens &amp; Retention Over Time
+                </h3>
+                <p className="font-label-sm text-label-sm text-on-surface-variant mt-0.5">
+                  Daily play volume and completed listener sessions
                 </p>
               </div>
+
+              {/* Timeframe Selector */}
+              <div className="flex bg-surface-container-low p-1 rounded-lg border border-outline-variant/50 self-start">
+                <button
+                  onClick={() => setTimeframe(7)}
+                  className={`px-3 py-1 rounded text-sm font-caption transition-all ${
+                    timeframe === 7 ? "bg-primary text-on-primary font-bold shadow-sm" : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  7 Days
+                </button>
+                <button
+                  onClick={() => setTimeframe(30)}
+                  className={`px-3 py-1 rounded text-sm font-caption transition-all ${
+                    timeframe === 30 ? "bg-primary text-on-primary font-bold shadow-sm" : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  30 Days
+                </button>
+                <button
+                  onClick={() => setTimeframe(90)}
+                  className={`px-3 py-1 rounded text-sm font-caption transition-all ${
+                    timeframe === 90 ? "bg-primary text-on-primary font-bold shadow-sm" : "text-on-surface-variant hover:text-on-surface"
+                  }`}
+                >
+                  90 Days
+                </button>
+              </div>
             </div>
 
-            <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm">
-              <div className="flex items-center gap-2 mb-4">
-                <Clock className="text-outline w-5 h-5" strokeWidth={1.5} />
-                <h3 className="font-caption text-caption text-on-surface-variant uppercase tracking-wide">Free Tier Usage</h3>
+            {loadingTimeseries ? (
+              <div className="h-56 flex items-center justify-center text-on-surface-variant">
+                <Loader2 className="w-6 h-6 animate-spin text-primary mr-2" />
+                <span className="font-caption text-caption">Loading time-series analytics…</span>
               </div>
-              <div className="flex items-baseline justify-between mb-2">
-                <div className="font-display-lg text-display-lg text-on-surface">
-                  {stats ? formatHours(Math.max(0, MONTHLY_QUOTA_SECONDS - stats.total_duration_seconds)) : "6h 0m"} left
+            ) : points.length > 0 ? (
+              <div>
+                {/* SVG Area Chart */}
+                <div className="w-full overflow-x-auto">
+                  <svg
+                    viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                    className="w-full h-56 overflow-visible select-none"
+                  >
+                    <defs>
+                      <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#4648d4" stopOpacity="0.35" />
+                        <stop offset="100%" stopColor="#4648d4" stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Horizontal Grid lines */}
+                    {[0, 0.5, 1].map((frac, idx) => {
+                      const y = paddingY + innerH * (1 - frac);
+                      const val = Math.round(maxPlays * frac);
+                      return (
+                        <g key={idx}>
+                          <line
+                            x1={paddingX}
+                            y1={y}
+                            x2={chartWidth - paddingX}
+                            y2={y}
+                            stroke="currentColor"
+                            className="text-outline-variant/30"
+                            strokeDasharray="4 4"
+                          />
+                          <text
+                            x={paddingX}
+                            y={y - 4}
+                            fill="currentColor"
+                            className="text-[10px] text-on-surface-variant/60 font-mono"
+                          >
+                            {val}
+                          </text>
+                        </g>
+                      );
+                    })}
+
+                    {/* Area fill */}
+                    {areaD && <path d={areaD} fill="url(#areaGradient)" />}
+
+                    {/* Line stroke */}
+                    {pathD && (
+                      <path
+                        d={pathD}
+                        fill="none"
+                        stroke="#4648d4"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Interactive dots */}
+                    {polylineCoords.map((coord, idx) => (
+                      <g
+                        key={idx}
+                        className="cursor-pointer"
+                        onMouseEnter={() => setHoveredPoint(coord.point)}
+                        onMouseLeave={() => setHoveredPoint(null)}
+                      >
+                        <circle
+                          cx={coord.x}
+                          cy={coord.y}
+                          r={hoveredPoint?.date === coord.point.date ? 5.5 : 3.5}
+                          className={`transition-all duration-150 ${
+                            hoveredPoint?.date === coord.point.date
+                              ? "fill-primary stroke-white stroke-2"
+                              : "fill-primary"
+                          }`}
+                        />
+                      </g>
+                    ))}
+                  </svg>
                 </div>
-                <span className="font-label-sm text-label-sm text-on-surface-variant">
-                  of {formatHours(MONTHLY_QUOTA_SECONDS)} this month
-                </span>
+
+                {/* Hover Details Card */}
+                <div className="mt-3 min-h-[32px] flex items-center justify-between text-xs text-on-surface-variant border-t border-outline-variant/40 pt-3">
+                  {hoveredPoint ? (
+                    <div className="flex items-center gap-4">
+                      <span className="font-bold text-on-surface font-mono">{hoveredPoint.date}</span>
+                      <span>
+                        Plays: <strong className="text-primary">{hoveredPoint.plays}</strong>
+                      </span>
+                      <span>
+                        Retention:{" "}
+                        <strong className="text-on-surface">{hoveredPoint.completion_rate}%</strong> completed
+                      </span>
+                      <span>
+                        Avg Listen:{" "}
+                        <strong className="text-on-surface">{Math.round(hoveredPoint.avg_duration_seconds)}s</strong>
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between w-full">
+                      <span>Hover over points to inspect daily listen retention</span>
+                      <div className="flex items-center gap-4">
+                        <span>
+                          Total Period Plays: <strong className="text-primary">{timeseries?.total_plays}</strong>
+                        </span>
+                        <span>
+                          Overall Retention:{" "}
+                          <strong className="text-on-surface">{timeseries?.overall_retention_rate}%</strong>
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
-              <div className="w-full bg-surface-container-high rounded-full h-2 mt-3 overflow-hidden">
-                <div
-                  className="bg-primary h-2 rounded-full transition-all"
-                  style={{ width: stats ? `${Math.min(100, (stats.total_duration_seconds / MONTHLY_QUOTA_SECONDS) * 100)}%` : "0%" }}
-                />
+            ) : (
+              <div className="h-48 flex items-center justify-center text-on-surface-variant font-body-md">
+                No listening data yet for this period. Upload episodes and start listening!
               </div>
-              <p className="font-caption text-caption text-on-surface-variant mt-4">
-                Listening time on any episode counts toward your free monthly quota.
-              </p>
-              <Link
-                href="/account"
-                className="mt-5 inline-block w-full text-center px-4 py-2 bg-surface-container text-on-surface rounded-md font-caption text-caption hover:bg-surface-container-high transition-colors"
-              >
-                Upgrade Plan
-              </Link>
+            )}
+          </div>
+
+          {/* Drafts & In-Progress Uploads Section */}
+          <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-2">
+                  <FileAudio className="w-5 h-5 text-primary" />
+                  Drafts &amp; In-Progress Voice Drops
+                </h3>
+                <p className="font-label-sm text-label-sm text-on-surface-variant mt-0.5">
+                  Audio processing in the cloud or waiting for your publish confirmation.
+                </p>
+              </div>
+              <span className="text-xs bg-surface-container-high text-on-surface-variant font-bold px-2.5 py-1 rounded-full">
+                {drafts.length} {drafts.length === 1 ? "draft" : "drafts"}
+              </span>
             </div>
+
+            {drafts.length === 0 ? (
+              <div className="py-8 text-center border border-dashed border-outline-variant/60 rounded-xl bg-surface-container-low/30">
+                <FileAudio className="w-8 h-8 text-on-surface-variant mx-auto mb-2 opacity-50" strokeWidth={1.5} />
+                <p className="font-caption text-caption text-on-surface-variant">No pending drafts.</p>
+                <p className="font-label-sm text-label-sm text-on-surface-variant/70 mt-1">
+                  Upload audio in New Drop — you can leave anytime and it will stay safely in Drafts.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {drafts.map((d) => {
+                  const isProcessing = d.status === "processing";
+                  const isReady = d.status === "ready";
+                  return (
+                    <div
+                      key={d.episode_id}
+                      className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-primary-fixed-dim transition-colors"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-lg bg-surface-container-high flex items-center justify-center flex-shrink-0">
+                          <FileAudio className="w-5 h-5 text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="font-caption text-caption font-bold text-on-surface truncate">
+                            {d.title}
+                          </h4>
+                          <div className="flex items-center gap-2 text-xs text-on-surface-variant mt-0.5">
+                            <span>{d.category}</span>
+                            <span>&bull;</span>
+                            <span>{d.duration_seconds > 0 ? `${Math.round(d.duration_seconds)}s` : "Processing…"}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        {isProcessing && (
+                          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20 text-xs font-bold">
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Enhancing in cloud…</span>
+                          </div>
+                        )}
+
+                        {isReady && (
+                          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-secondary-fixed text-on-secondary-fixed text-xs font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Ready to publish</span>
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handlePublishDraft(d.episode_id)}
+                          disabled={publishingDraftId === d.episode_id}
+                          className="px-4 py-2 bg-primary text-on-primary font-caption text-caption font-bold rounded-lg hover:bg-on-primary-fixed-variant transition-colors disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          {publishingDraftId === d.episode_id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <ArrowUpRight className="w-4 h-4" />
+                          )}
+                          Publish Now
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Published Episodes Section */}
+          <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="font-headline-md text-headline-md text-on-surface flex items-center gap-2">
+                  <Headphones className="w-5 h-5 text-primary" />
+                  Your Published Episodes
+                </h3>
+                <p className="font-label-sm text-label-sm text-on-surface-variant mt-0.5">
+                  Live on the Oxiverse Discovery network
+                </p>
+              </div>
+              <span className="text-xs bg-surface-container-high text-on-surface-variant font-bold px-2.5 py-1 rounded-full">
+                {myEpisodes.length} {myEpisodes.length === 1 ? "episode" : "episodes"}
+              </span>
+            </div>
+
+            {myEpisodes.length === 0 ? (
+              <div className="py-8 text-center border border-dashed border-outline-variant/60 rounded-xl bg-surface-container-low/30">
+                <p className="font-caption text-caption text-on-surface-variant">No published episodes yet.</p>
+                <Link href="/new-drop" className="text-primary font-bold hover:underline text-xs mt-1 inline-block">
+                  Upload your first drop &rarr;
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {myEpisodes.map((ep) => (
+                  <div
+                    key={ep.episode_id}
+                    className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-primary transition-colors"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center flex-shrink-0">
+                        <Play className="w-5 h-5 text-primary ml-0.5" />
+                      </div>
+                      <div className="min-w-0">
+                        <h4 className="font-caption text-caption font-bold text-on-surface truncate">
+                          {ep.title}
+                        </h4>
+                        <div className="flex items-center gap-2 text-xs text-on-surface-variant mt-0.5">
+                          <span>{ep.category}</span>
+                          <span>&bull;</span>
+                          <span>{Math.round(ep.duration_seconds)}s</span>
+                          <span>&bull;</span>
+                          <span className="text-primary font-bold">{ep.play_count} plays</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Link
+                      href={`/now-playing?id=${ep.episode_id}`}
+                      className="px-4 py-2 bg-surface-container-high hover:bg-surface-variant text-on-surface font-caption text-caption rounded-lg transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+                    >
+                      Listen
+                      <ArrowUpRight className="w-4 h-4" />
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </main>

@@ -68,6 +68,15 @@ async def ingest(request: Request, body: IngestRequest, principal: Principal = D
 async def create_session(asset_id: str, request: Request,
                          principal: Principal = Depends(require_principal)):
     sess = await _ab(request).create_session(asset_id, principal)
+    # Automatically log initial play event if an episode exists
+    repo = getattr(request.app.state, "repository", None)
+    if repo is not None:
+        try:
+            ep = await repo.get_episode_by_asset(asset_id)
+            if ep is not None:
+                await repo.record_play(ep["episode_id"], ep["creator_id"], int(time.time()), 0.0, False)
+        except Exception:
+            pass
     return {"session_id": sess.session_id, "expires_at": sess.expires_at}
 
 

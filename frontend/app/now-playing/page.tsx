@@ -81,20 +81,50 @@ function NowPlayingContent() {
     }
   }, [episode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Generate waveform bars
+  // Track and record play analytics
+  const lastRecordedTimeRef = useRef<number>(0);
+  useEffect(() => {
+    if (!episode || !isPlaying || duration <= 0) return;
+    const diff = currentTime - lastRecordedTimeRef.current;
+    const isFinished = currentTime >= duration - 1;
+    if (diff >= 15 || isFinished) {
+      lastRecordedTimeRef.current = currentTime;
+      api.recordPlay(episode.episode_id, {
+        duration_listened_seconds: Math.round(currentTime),
+        completed: isFinished,
+      }).catch(() => {});
+    }
+  }, [episode, isPlaying, currentTime, duration]);
+
+  // Generate waveform bars from real peaks
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
     const numBars = Math.max(20, Math.floor(container.clientWidth / 6));
     container.innerHTML = "";
+
+    const rawPeaks = episode?.waveform_peaks;
+
     for (let i = 0; i < numBars; i++) {
       const bar = document.createElement("div");
       bar.className = "waveform-bar";
-      const height = Math.floor(Math.random() * 90) + 10;
+
+      let height = 15;
+      if (rawPeaks && rawPeaks.length > 0) {
+        // Sample from true recorded peaks
+        const peakIdx = Math.min(rawPeaks.length - 1, Math.floor((i / numBars) * rawPeaks.length));
+        const val = rawPeaks[peakIdx];
+        height = Math.max(8, Math.min(100, Math.round(val * 100)));
+      } else {
+        // Natural speech curve fallback if peaks were not captured
+        const envelope = Math.sin((i / numBars) * Math.PI);
+        height = 15 + Math.round(envelope * 65);
+      }
+
       bar.style.height = `${height}%`;
       // Highlight bars based on progress
       const progress = duration > 0 ? currentTime / duration : 0;
-      if (i < numBars * progress) bar.classList.add("active");
+      if (i <= Math.floor(numBars * progress)) bar.classList.add("active");
       container.appendChild(bar);
     }
   }, [episode, currentTime, duration]);
