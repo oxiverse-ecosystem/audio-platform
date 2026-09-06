@@ -4,9 +4,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Home,
-  Users,
-  LibraryBig,
-  Wallet,
   Mic,
   Settings,
   ShieldCheck,
@@ -18,9 +15,7 @@ import { cn } from "@/lib/utils";
 
 const NAV = [
   { icon: Home, label: "Home", href: "/discovery" },
-  { icon: Users, label: "Following", href: "/discovery" },
-  { icon: LibraryBig, label: "Creator Packs", href: "/account" },
-  { icon: Wallet, label: "Library", href: "/discovery" },
+  { icon: ShieldCheck, label: "Creator Studio", href: "/creator" },
 ];
 
 export function Sidebar() {
@@ -69,13 +64,6 @@ export function Sidebar() {
         >
           <Settings className="w-5 h-5" strokeWidth={1.5} />
           Account
-        </Link>
-        <Link
-          href="/creator"
-          className="flex items-center gap-3 px-3 py-2.5 rounded-lg font-caption text-caption text-on-surface-variant hover:bg-surface-container-high transition-colors"
-        >
-          <ShieldCheck className="w-5 h-5" strokeWidth={1.5} />
-          Creator
         </Link>
         <Link
           href="/account"

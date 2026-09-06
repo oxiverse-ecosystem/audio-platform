@@ -173,7 +173,7 @@ export const api = {
   getEpisode: (episodeId: string) =>
     request<EpisodeResponse>(`/v1/episodes/${episodeId}`),
 
-  createEpisode: (data: { asset_id: string; title: string; description?: string; category?: string; visibility?: string }) =>
+  createEpisode: (data: { asset_id: string; title: string; description?: string; category?: string }) =>
     request<EpisodeResponse>("/v1/episodes", {
       method: "POST",
       body: JSON.stringify(data),

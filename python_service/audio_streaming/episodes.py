@@ -26,7 +26,6 @@ class CreateEpisodeRequest(BaseModel):
     title: str
     description: str | None = None
     category: str = "Founder Stories"
-    visibility: str = "public"
 
 
 class EpisodeResponse(BaseModel):
@@ -52,14 +51,13 @@ async def create_episode(
     """Publish a ready upload so it appears in discovery and is immediately playable.
 
     The referenced upload must have finished studio processing (job status ``ready``).
-    Publishing bakes the A/B watermarked HLS segments + AES key so playback works, and
-    stores the real duration from the processing report.
+    Publishing bakes the A/B watermarked HLS segments + AES key so playback works, stores
+    the real duration from the processing report, and makes the episode visible to everyone
+    on Discovery ("all under one" model; no per-episode visibility).
     """
     repo = _repo(request)
     if not body.title.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="title required")
-    if body.visibility not in ("public", "pack", "private"):
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="invalid visibility")
 
     job = await request.app.state.jobs_repository.get_job_by_asset(body.asset_id)
     if job is None:
@@ -87,7 +85,7 @@ async def create_episode(
     now = int(time.time())
     await repo.create_episode(
         episode_id, job.asset_id, principal.subject, body.title.strip(),
-        body.description, body.category, body.visibility, duration, now,
+        body.description, body.category, "public", duration, now,
     )
     episode = await repo.get_episode(episode_id)
     return EpisodeResponse(**episode)

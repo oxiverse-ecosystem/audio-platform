@@ -278,12 +278,6 @@ function NowPlayingContent() {
                   <p className="font-body-md text-body-md text-on-surface">{episode.category}</p>
                 </div>
               </li>
-              <li className="flex gap-4">
-                <span className="font-label-sm text-label-sm text-on-surface-variant mt-1">Visibility</span>
-                <div>
-                  <p className="font-body-md text-body-md text-on-surface capitalize">{episode.visibility}</p>
-                </div>
-              </li>
             </ul>
           </div>
           <p className="font-caption text-caption text-on-surface-variant/70 text-center flex items-center justify-center gap-2">

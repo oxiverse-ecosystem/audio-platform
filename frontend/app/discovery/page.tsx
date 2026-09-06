@@ -3,9 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Lock, Clock, Play, Bolt, Loader2, Mic2 } from "lucide-react";
+import { Search, Clock, Play, Bolt, Loader2, Mic2 } from "lucide-react";
 import { Sidebar } from "@/components/Sidebar";
 import { Player } from "@/components/Player";
+import { useAuth } from "@/context/AuthContext";
 import { api, EpisodeResponse } from "@/lib/api";
 
 const DEFAULT_CATEGORIES = ["All", "Tech", "Business", "Founder Stories", "Science", "Product"];
@@ -35,12 +36,14 @@ function formatHours(seconds: number): string {
 }
 
 export default function DiscoveryPage() {
+  const { user } = useAuth();
   const router = useRouter();
   const [episodes, setEpisodes] = useState<EpisodeResponse[]>([]);
+  const [myEpisodes, setMyEpisodes] = useState<EpisodeResponse[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All");
-  const [analytics, setAnalytics] = useState<{ total_duration_seconds: number; total_plays: number } | null>(null);
+  const [analytics, setAnalytics] = useState<{ total_episodes: number; total_plays: number; total_duration_seconds: number } | null>(null);
 
   const fetchEpisodes = useCallback(async () => {
     setLoading(true);
@@ -62,10 +65,15 @@ export default function DiscoveryPage() {
   }, [fetchEpisodes]);
 
   useEffect(() => {
+    setMyEpisodes(null);
+    setAnalytics(null);
     api.getMyAnalytics()
       .then(setAnalytics)
       .catch(() => setAnalytics(null));
-  }, []);
+    api.getMyEpisodes()
+      .then((r) => setMyEpisodes(r.episodes))
+      .catch(() => setMyEpisodes(null));
+  }, [user]);
 
   return (
     <div className="flex min-h-screen bg-surface">
@@ -73,7 +81,92 @@ export default function DiscoveryPage() {
       <main className="flex-1 flex flex-col md:flex-row min-w-0 overflow-hidden md:pl-sidebar">
         {/* Center Canvas */}
         <div className="flex-1 overflow-y-auto px-margin-mobile md:px-margin-desktop py-stack-lg hide-scrollbar">
-          <div className="max-w-container-max mx-auto mb-stack-lg">
+          <div className="max-w-container-max mx-auto mb-stack-lg space-y-stack-lg">
+            {user && (
+              <div className="bg-surface-container-lowest rounded-2xl border border-outline-variant/40 shadow-sm overflow-hidden">
+                <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <p className="font-caption text-caption uppercase tracking-wider text-on-surface-variant mb-1">
+                      Welcome{user.display_name ? `, ${user.display_name}` : " back"}
+                    </p>
+                    <h2 className="font-headline-md text-headline-md text-on-surface font-bold">Your Studio</h2>
+                  </div>
+                  <div className="flex gap-3">
+                    <Link
+                      href="/new-drop"
+                      className="inline-flex items-center gap-2 bg-primary text-on-primary font-label-sm text-label-sm px-4 py-2 rounded-lg hover:bg-primary-container transition-colors"
+                    >
+                      <Mic2 className="w-4 h-4" strokeWidth={1.5} />
+                      Publish a drop
+                    </Link>
+                    <Link
+                      href="/creator"
+                      className="inline-flex items-center gap-2 bg-surface-container text-on-surface font-label-sm text-label-sm px-4 py-2 rounded-lg hover:bg-surface-container-high transition-colors"
+                    >
+                      <Bolt className="w-4 h-4" strokeWidth={1.5} />
+                      Creator studio
+                    </Link>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 divide-x divide-outline-variant/30 border-t border-outline-variant/40">
+                  <div className="p-4 sm:p-5">
+                    <p className="font-label-sm text-label-sm text-on-surface-variant">Episodes</p>
+                    <p className="font-headline-md text-headline-md text-on-surface font-bold mt-1">{myEpisodes?.length ?? analytics?.total_episodes ?? 0}</p>
+                  </div>
+                  <div className="p-4 sm:p-5">
+                    <p className="font-label-sm text-label-sm text-on-surface-variant">Hours published</p>
+                    <p className="font-headline-md text-headline-md text-on-surface font-bold mt-1">{formatHours(analytics?.total_duration_seconds ?? 0)}</p>
+                  </div>
+                  <div className="p-4 sm:p-5">
+                    <p className="font-label-sm text-label-sm text-on-surface-variant">Total plays</p>
+                    <p className="font-headline-md text-headline-md text-on-surface font-bold mt-1">{formatPlays(analytics?.total_plays ?? 0)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {user && myEpisodes && myEpisodes.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-stack-md">
+                  <h3 className="font-caption text-caption font-bold text-on-surface">Your Episodes</h3>
+                  <button
+                    onClick={() => router.push("/creator")}
+                    className="font-label-sm text-label-sm text-primary hover:text-on-primary-fixed transition-colors"
+                  >
+                    View all →
+                  </button>
+                </div>
+                <div className="flex gap-gutter overflow-x-auto pb-2 -mx-1 px-1 hide-scrollbar">
+                  {myEpisodes.map((ep) => (
+                    <MiniEpisodeCard key={ep.episode_id} ep={ep} onPlay={() => router.push(`/now-playing?id=${ep.episode_id}`)} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {user && myEpisodes && myEpisodes.length === 0 && (
+              <div className="bg-surface-container-lowest rounded-xl border border-outline-variant/40 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-sm">
+                <div>
+                  <p className="font-caption text-caption font-bold text-on-surface">No drops yet</p>
+                  <p className="font-label-sm text-label-sm text-on-surface-variant mt-1">Publish your first founder story — it will appear right here and in the feed.</p>
+                </div>
+                <button
+                  onClick={() => router.push("/new-drop")}
+                  className="shrink-0 inline-flex items-center gap-2 bg-primary text-on-primary font-label-sm text-label-sm px-4 py-2 rounded-lg hover:bg-primary-container transition-colors"
+                >
+                  <Mic2 className="w-4 h-4" strokeWidth={1.5} />
+                  Publish a drop
+                </button>
+              </div>
+            )}
+
+            {/* Discover header */}
+            <div className="pt-stack-md">
+              <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-stack-md">
+                Discover
+              </h2>
+            </div>
+
             {/* Search */}
             <div className="relative w-full max-w-2xl">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-outline w-5 h-5" strokeWidth={1.5} />
@@ -184,6 +277,28 @@ export default function DiscoveryPage() {
   );
 }
 
+function MiniEpisodeCard({ ep, onPlay }: { ep: EpisodeResponse; onPlay: () => void }) {
+  return (
+    <div
+      onClick={onPlay}
+      className="flex flex-col w-52 shrink-0 bg-surface-container-lowest rounded-xl border border-outline-variant/40 p-4 hover:border-primary-fixed-dim hover:shadow-[0_4px_20px_rgba(96,99,238,0.08)] transition-all group cursor-pointer"
+    >
+      <div className="flex-1">
+        <p className="font-label-sm text-label-sm text-outline mb-1">{timeAgo(ep.created_at)}</p>
+        <h4 className="font-body-md text-body-md text-on-surface font-semibold line-clamp-2 leading-snug">{ep.title}</h4>
+      </div>
+      <div className="mt-3 flex items-center justify-between">
+        <span className="font-label-sm text-label-sm text-outline flex items-center gap-1">
+          <Clock className="w-3.5 h-3.5" strokeWidth={1.5} /> {formatDuration(ep.duration_seconds)}
+        </span>
+        <span className="w-8 h-8 rounded-full bg-surface-container-high group-hover:bg-primary group-hover:text-on-primary flex items-center justify-center transition-colors">
+          <Play className="w-4 h-4" strokeWidth={1.5} />
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function EpisodeCard({ ep, onPlay }: { ep: EpisodeResponse; onPlay: () => void }) {
   return (
     <div
@@ -200,11 +315,6 @@ function EpisodeCard({ ep, onPlay }: { ep: EpisodeResponse; onPlay: () => void }
             <p className="font-label-sm text-label-sm text-outline text-[10px]">{timeAgo(ep.created_at)}</p>
           </div>
         </div>
-        {ep.visibility === "pack" && (
-          <span className="bg-surface-container px-2 py-0.5 rounded text-[10px] font-label-sm text-on-surface-variant flex items-center gap-1 border border-outline-variant/20">
-            <Lock className="w-3 h-3" strokeWidth={1.5} /> Pack
-          </span>
-        )}
       </div>
       <h3 className="font-headline-md text-headline-md font-bold mb-2 leading-tight">{ep.title}</h3>
       {ep.description && (

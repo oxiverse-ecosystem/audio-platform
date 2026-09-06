@@ -8,8 +8,6 @@ import { api, ApiError } from "@/lib/api";
 import {
   CloudUpload,
   CheckCircle,
-  Globe,
-  Lock,
   Play,
   Pause,
   Loader2,
@@ -18,7 +16,6 @@ import {
   Trash2,
 } from "lucide-react";
 
-type Visibility = "public" | "pack";
 type Stage = "idle" | "uploading" | "processing" | "ready" | "failed";
 
 export default function NewDropPage() {
@@ -29,8 +26,6 @@ export default function NewDropPage() {
   const [file, setFile] = useState<File | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [visibility, setVisibility] = useState<Visibility>("pack");
-  const [inPack, setInPack] = useState(true);
 
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState(0);
@@ -102,7 +97,6 @@ export default function NewDropPage() {
         title: title || file?.name || "Untitled",
         description: description || undefined,
         category: "Founder Stories",
-        visibility: visibility === "public" ? "public" : "pack",
       });
       setPublished(true);
     } catch (err: unknown) {
@@ -387,30 +381,9 @@ export default function NewDropPage() {
                     placeholder="A brief overview of your audio…"
                   />
                 </div>
-                <div className="pt-4 border-t border-outline-variant">
-                  <label className="block font-label-sm text-label-sm text-on-surface-variant mb-4">VISIBILITY</label>
-                  <div className="flex gap-4">
-                    <label className="flex-1 cursor-pointer">
-                      <input className="peer sr-only" name="visibility" type="radio" checked={visibility === "public"} onChange={() => setVisibility("public")} />
-                      <div className="border border-outline-variant rounded-lg p-4 text-center peer-checked:border-primary peer-checked:bg-secondary-container transition-colors">
-                        <Globe className="w-6 h-6 mb-2 text-on-surface-variant mx-auto" strokeWidth={1.5} />
-                        <p className="font-caption text-caption text-on-surface">Public</p>
-                      </div>
-                    </label>
-                    <label className="flex-1 cursor-pointer">
-                      <input className="peer sr-only" name="visibility" type="radio" checked={visibility === "pack"} onChange={() => setVisibility("pack")} />
-                      <div className="border border-outline-variant rounded-lg p-4 text-center peer-checked:border-primary peer-checked:bg-secondary-container transition-colors">
-                        <Lock className="w-6 h-6 mb-2 text-on-surface-variant mx-auto" strokeWidth={1.5} />
-                        <p className="font-caption text-caption text-on-surface">Creator-Pack Only</p>
-                      </div>
-                    </label>
-                  </div>
-                </div>
                 <div className="pt-4">
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input className="w-5 h-5 text-primary bg-surface-container-low border-outline-variant rounded" type="checkbox" checked={inPack} onChange={(e) => setInPack(e.target.checked)} />
-                    <span className="font-caption text-caption text-on-surface">Set as part of your active pack</span>
-                  </label>
+                  <label className="font-label-sm text-label-sm text-on-surface-variant mb-2 block">PUBLISH</label>
+                  <p className="font-caption text-caption text-on-surface-variant">Visible to everyone on Discovery.</p>
                 </div>
               </div>
 

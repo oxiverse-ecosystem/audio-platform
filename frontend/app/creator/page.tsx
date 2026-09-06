@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/context/AuthContext";
@@ -8,8 +9,7 @@ import { api, ApiError } from "@/lib/api";
 import {
   Headphones,
   User,
-  Banknote,
-  CreditCard,
+  Clock,
   TrendingUp,
   Landmark,
   Loader2,
@@ -20,13 +20,18 @@ interface Analytics {
   total_plays: number;
   total_duration_seconds: number;
   total_earnings: number;
-  pack_subscribers: number;
 }
 
 function formatNumber(n: number): string {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(n);
+}
+
+function formatHours(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
 }
 
 export default function CreatorDashboardPage() {
@@ -65,12 +70,14 @@ export default function CreatorDashboardPage() {
     );
   }
 
+  const MONTHLY_QUOTA_SECONDS = 21600;
+
   const STATS = stats
     ? [
         { label: "Total Episodes", value: formatNumber(stats.total_episodes), delta: "Published", icon: Headphones, up: true },
         { label: "Total Plays", value: formatNumber(stats.total_plays), delta: "All time", icon: User, up: true },
-        { label: "Total Hours", value: `${Math.round(stats.total_duration_seconds / 3600)}h`, delta: "Content", icon: Banknote, up: true },
-        { label: "Pack Subscribers", value: formatNumber(stats.pack_subscribers), delta: "Active", icon: CreditCard, up: true },
+        { label: "Total Hours", value: `${Math.round(stats.total_duration_seconds / 3600)}h`, delta: "Content", icon: Clock, up: true },
+        { label: "Quota Left", value: formatHours(Math.max(0, MONTHLY_QUOTA_SECONDS - stats.total_duration_seconds)), delta: "Free tier this month", icon: Landmark, up: true },
       ]
     : [];
 
@@ -82,9 +89,9 @@ export default function CreatorDashboardPage() {
           <header className="flex justify-between items-end pb-stack-md border-b border-outline-variant/50">
             <div>
               <h2 className="font-headline-lg-mobile md:font-headline-lg text-headline-lg-mobile md:text-headline-lg text-on-surface mb-2">
-                Creator Analytics
+                Creator Studio
               </h2>
-              <p className="font-body-md text-body-md text-on-surface-variant">Your pack performance and earnings overview.</p>
+              <p className="font-body-md text-body-md text-on-surface-variant">Your studio overview, monthly usage, and growth.</p>
             </div>
             <div className="hidden sm:block">
               <span className="bg-secondary-fixed text-on-secondary-fixed px-3 py-1 rounded-full font-label-sm text-label-sm uppercase">
@@ -133,7 +140,7 @@ export default function CreatorDashboardPage() {
             </div>
           </div>
 
-          {/* Bottom: payout + pricing */}
+          {/* Bottom: payout + quota */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-gutter pb-stack-lg">
             <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm flex flex-col justify-between">
               <div>
@@ -150,38 +157,34 @@ export default function CreatorDashboardPage() {
               </div>
             </div>
 
-            <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm relative overflow-hidden">
-              <h3 className="font-headline-md text-headline-md text-on-surface mb-2 relative z-10">Creator Pack Pricing</h3>
-              <p className="font-body-md text-body-md text-on-surface-variant mb-6 relative z-10">
-                Adjust the monthly subscription price for your premium audio packs.
-              </p>
-              <div className="space-y-4 relative z-10">
-                <div>
-                  <label className="block font-label-sm text-label-sm text-on-surface-variant uppercase mb-1" htmlFor="price">
-                    Monthly Price (USD)
-                  </label>
-                  <div className="relative mt-1 rounded-md shadow-sm">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                      <span className="text-outline font-body-md">$</span>
-                    </div>
-                    <input
-                      className="block w-full rounded-md border-outline-variant/50 pl-7 py-3 text-on-surface focus:border-primary focus:ring-primary sm:text-sm bg-surface-container-lowest font-body-md font-medium"
-                      id="price"
-                      name="price"
-                      placeholder="9.99"
-                      type="number"
-                      defaultValue="9.99"
-                    />
-                  </div>
-                  <p className="mt-2 text-sm text-outline font-caption flex items-center gap-1">
-                    Suggested range: $5 - $15/mo based on your audience.
-                  </p>
-                </div>
-                <div className="pt-4 border-t border-outline-variant/30 flex justify-end gap-3">
-                  <button className="px-4 py-2 bg-surface-container text-on-surface rounded-md font-caption text-caption hover:bg-surface-container-high transition-colors">Cancel</button>
-                  <button className="px-4 py-2 bg-primary text-on-primary rounded-md font-caption text-caption hover:bg-primary/90 transition-colors shadow-sm">Save Changes</button>
-                </div>
+            <div className="bg-surface-container-lowest p-6 rounded-xl border border-outline-variant/50 shadow-sm">
+              <div className="flex items-center gap-2 mb-4">
+                <Clock className="text-outline w-5 h-5" strokeWidth={1.5} />
+                <h3 className="font-caption text-caption text-on-surface-variant uppercase tracking-wide">Free Tier Usage</h3>
               </div>
+              <div className="flex items-baseline justify-between mb-2">
+                <div className="font-display-lg text-display-lg text-on-surface">
+                  {stats ? formatHours(Math.max(0, MONTHLY_QUOTA_SECONDS - stats.total_duration_seconds)) : "6h 0m"} left
+                </div>
+                <span className="font-label-sm text-label-sm text-on-surface-variant">
+                  of {formatHours(MONTHLY_QUOTA_SECONDS)} this month
+                </span>
+              </div>
+              <div className="w-full bg-surface-container-high rounded-full h-2 mt-3 overflow-hidden">
+                <div
+                  className="bg-primary h-2 rounded-full transition-all"
+                  style={{ width: stats ? `${Math.min(100, (stats.total_duration_seconds / MONTHLY_QUOTA_SECONDS) * 100)}%` : "0%" }}
+                />
+              </div>
+              <p className="font-caption text-caption text-on-surface-variant mt-4">
+                Listening time on any episode counts toward your free monthly quota.
+              </p>
+              <Link
+                href="/account"
+                className="mt-5 inline-block w-full text-center px-4 py-2 bg-surface-container text-on-surface rounded-md font-caption text-caption hover:bg-surface-container-high transition-colors"
+              >
+                Upgrade Plan
+              </Link>
             </div>
           </div>
         </div>
